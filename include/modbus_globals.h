@@ -20,8 +20,9 @@
 #define NUM_GPIO         54
 #define MAX_STATIC_REGS  32
 #define MAX_STATIC_COILS 64
-#define SLAVE_ID         10
-#define BAUDRATE         19200
+
+#define SLAVE_ID         1
+#define BAUDRATE         9600
 
 // ---------------------------------------------------------------------------
 //  Globale buffere

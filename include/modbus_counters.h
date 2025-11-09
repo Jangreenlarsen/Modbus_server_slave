@@ -1,12 +1,18 @@
 // ============================================================================
 //  Filnavn : modbus_counters.h
 //  Projekt  : Modbus RTU Server / CLI
-//  Version  : v3.1.4-patch3 (2025-11-05)
+//  Version  : v3.2.0 (2025-11-09)
 //  Forfatter: ChatGPT Automation
 //  Formål   : Header for CounterEngine v3 med 4 uafhængige input-tællere,
 //             inkl. prescaler, bitwidth, overflow-flag, retning, scaling,
 //             soft-control via controlReg (start/stop/reset) og debounce.
 //  Ændringer:
+//    - v3.2.0: Tilføjet counterAutoStartEnable[4] array for individuel
+//              auto-start kontrol ved config load/reboot.
+//              CLI-kommando: "set counters start counter<n>:on|off"
+//    - v3.1.9: Tilføjet global counter control-struktur med individuelle
+//              reset-on-read enable flags (counterResetOnReadEnable[4]).
+//              CLI-kommando: "set counters reset-on-read counter<n>:on|off"
 //    - v3.1.4-patch3: Tilføjet counters_print_status() til tabelformat
 //                     'show counters' i CLI.
 //    - v3.1.4-patch2: Tilføjet debounceEnable/debounceTimeMs/lastEdgeMs til
@@ -16,6 +22,14 @@
 #pragma once
 #include <Arduino.h>
 #include "modbus_globals.h"
+
+// ============================================================================
+// CounterEngine - Global control arrays
+// ============================================================================
+// Arrays til at styre counter funktioner individuelt for hver counter (1..4)
+// 0 = disabled, 1 = enabled
+extern uint8_t counterResetOnReadEnable[4];  // index 0..3 = counter 1..4
+extern uint8_t counterAutoStartEnable[4];    // auto-start ved config load/reboot
 
 // Interne helpers brugt af CounterEngine og Modbus FC
 uint8_t sanitizeBitWidth(uint8_t bw);

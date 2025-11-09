@@ -51,8 +51,8 @@ bool configLoad(PersistConfig &cfg) {
     configDefaults(cfg);
     return false;
   }
-  if (cfg.schema != 6) {
-  Serial.println(F("⚠ EEPROM schema !=6 – resetting to defaults"));
+  if (cfg.schema != 8) {
+  Serial.println(F("⚠ EEPROM schema !=8 – resetting to defaults"));
   configDefaults(cfg);
   return false;
 }
@@ -65,7 +65,7 @@ bool configLoad(PersistConfig &cfg) {
 void configDefaults(PersistConfig &cfg) {
   memset(&cfg, 0, sizeof(cfg));
   cfg.magic      = 0xC0DE;
-  cfg.schema     = 6;
+  cfg.schema     = 8;
   cfg.slaveId    = SLAVE_ID;
   cfg.serverFlag = 1;
   cfg.baud       = BAUDRATE;
@@ -81,6 +81,8 @@ void configDefaults(PersistConfig &cfg) {
   for (uint8_t i=0; i<4; i++) {
     memset(&cfg.timer[i],   0, sizeof(TimerConfig));
     memset(&cfg.counter[i], 0, sizeof(CounterConfig));
+    cfg.counterResetOnReadEnable[i] = 0;  // default: disabled
+    cfg.counterAutoStartEnable[i]   = 0;  // default: disabled (manual start)
   }
 
   for (uint8_t p=0; p<NUM_GPIO; ++p) {
@@ -103,7 +105,12 @@ bool configSave(const PersistConfig &cfgIn) {
 
   strncpy(tmp.hostname, cliHostname, sizeof(tmp.hostname));
 
-  tmp.schema = 6;
+  // Gem counter reset-on-read enable flags
+  for (uint8_t i = 0; i < 4; ++i) {
+    tmp.counterResetOnReadEnable[i] = counterResetOnReadEnable[i];
+  }
+
+  tmp.schema = 7;
   computeFillCrc(tmp);
 
   EEPROM.put(0, tmp);
@@ -175,23 +182,19 @@ for (uint8_t i = 0; i < coilStaticCount && i < MAX_STATIC_COILS; i++) {
 
   // --- Counters ---
   counters_init();
+  
+  // Gendan counter reset-on-read enable flags
+  for (uint8_t i = 0; i < 4; ++i) {
+    counterResetOnReadEnable[i] = cfg.counterResetOnReadEnable[i];
+  }
+  
   CounterConfig tmp[4];
   for (uint8_t i = 0; i < cfg.counterCount && i < 4; i++) {
     tmp[i] = cfg.counter[i];
-    if (tmp[i].enabled && (tmp[i].controlFlags & 0x0008))
-      holdingRegs[tmp[i].controlReg] |= 0x0008;
   }
 
   for (uint8_t i = 0; i < cfg.counterCount && i < 4; i++)
     counters_config_set(tmp[i].id, tmp[i]);
-
-  for (uint8_t i = 0; i < cfg.counterCount && i < 4; i++) {
-    const CounterConfig& c = counters[i];
-    if (c.enabled && c.controlReg < NUM_REGS && (c.controlFlags & 0x0008)) {
-      holdingRegs[c.controlReg] |= 0x0008;
-      counters[i].controlFlags |= 0x0008;
-    }
-  }
 
   // --- GPIO mapping ---
   for (uint8_t pin=0; pin<NUM_GPIO; ++pin) {

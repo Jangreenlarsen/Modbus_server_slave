@@ -30,6 +30,12 @@
 CounterConfig counters[4];
 
 // ============================================================================
+// Global control arrays (individuelt pr. counter)
+// ============================================================================
+uint8_t counterResetOnReadEnable[4] = {0, 0, 0, 0};  // counter 1..4 (index 0..3)
+uint8_t counterAutoStartEnable[4]   = {0, 0, 0, 0};  // auto-start ved load/reboot
+
+// ============================================================================
 //  Interne helpers
 // ============================================================================
 
@@ -66,7 +72,7 @@ static uint8_t sanitizeEdge(uint8_t e) {
 
 static uint8_t sanitizePrescaler(uint8_t p) {
   if (p == 0) return 1;
-  if (p > 255) return 255;
+  if (p > 256) return 256;
   return p;
 }
 
@@ -349,13 +355,6 @@ bool counters_config_set(uint8_t id, const CounterConfig& src) {
   c.bitWidth  = sanitizeBitWidth(c.bitWidth);
   c.prescaler = sanitizePrescaler(c.prescaler);
 
-  // Overfør persistent bit3-status fra aktuelt controlReg (hvis aktiv)
-  if (c.controlReg < NUM_REGS && (holdingRegs[c.controlReg] & 0x0008)) {
-   c.controlFlags |= 0x0008;
-  } else {
-   c.controlFlags &= ~0x0008;
-  }
-  
   if (c.inputIndex >= NUM_DISCRETE) c.inputIndex = 0;
 
   if (isnan(c.scale) || c.scale <= 0.0f || c.scale > 100000.0f) c.scale = 1.0f;
@@ -372,8 +371,8 @@ if (c.debounceEnable) {
 }
 c.lastEdgeMs = 0;
 
-  // Auto-start counters der er enablet i config
-  c.running       = (c.enabled ? 1 : 0);
+  // Auto-start counters baseret på counterAutoStartEnable array
+  c.running       = (c.enabled && counterAutoStartEnable[idx]) ? 1 : 0;
   c.overflowFlag  = 0;
   c.edgeCount     = 0;
 
@@ -477,7 +476,7 @@ void counters_print_status() {
     sprintf(buf, "%-5d| ", c.overflowReg); Serial.print(buf);
     sprintf(buf, "%-5d| ", c.controlReg); Serial.print(buf);
     sprintf(buf, "%-6s| ", dirStr); Serial.print(buf);
-    sprintf(buf, "%-7.3f| ", (double)c.scale);  // Cast til double
+    sprintf(buf, "%-7.3f| ", c.scale); Serial.print(buf);
     sprintf(buf, "%-5d| ", c.regIndex); Serial.print(buf);
     sprintf(buf, "%-4s| ", dStr); Serial.print(buf);
     sprintf(buf, "%-5d| ", c.debounceTimeMs); Serial.print(buf);

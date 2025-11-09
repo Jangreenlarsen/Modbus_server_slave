@@ -47,12 +47,11 @@ static void fc_read_hregs(uint8_t rxSlave,uint8_t* f){
     resp[idx++]=v;
   }
   
-  // --- Reset-on-Read (bit3) håndtering for CounterEngine ---
+  // --- Reset-on-Read håndtering for CounterEngine ---
   for (uint8_t ci = 0; ci < 4; ++ci) {
     CounterConfig& c = counters[ci];
     if (!c.enabled) continue;
-    if (c.controlReg >= NUM_REGS) continue;
-    if (!(holdingRegs[c.controlReg] & 0x0008)) continue;  // bit3 ikke sat
+    if (!counterResetOnReadEnable[ci]) continue;  // reset-on-read ikke enabled for denne counter
 
     // Bestem tællerens registerområde (skaleret værdi)
     uint8_t words = (c.bitWidth == 64) ? 4 : (c.bitWidth == 32 ? 2 : 1);
@@ -126,7 +125,7 @@ static void fc_write_single_reg(uint8_t rxSlave,uint8_t* f){
 
     // Byg aktuel config (samme som CLI SAVE)
     cfg.magic      = 0xC0DE;
-    cfg.schema     = 5;
+    cfg.schema     = 7;  // Opdateret til schema 7
     cfg.slaveId    = currentSlaveID;
     cfg.serverFlag = serverRunning ? 1 : 0;
     cfg.baud       = currentBaudrate;
@@ -170,19 +169,6 @@ static void fc_write_single_reg(uint8_t rxSlave,uint8_t* f){
     }
   }
 
-  // --- CounterEngine: spejl ændring i control-registret til counterFlags ---
-  for (uint8_t ci = 0; ci < 4; ++ci) {
-    CounterConfig& c = counters[ci];
-    if (!c.enabled) continue;
-    if (c.controlReg == a) {
-      if (v & 0x0008)
-        c.controlFlags |= 0x0008;
-      else
-        c.controlFlags &= ~0x0008;
-      break;
-    }
-  }
-
   // --- TimerEngine: opdater sticky reset-on-read flag (control-reg) ---
   if (a == timerStatusCtrlRegIndex && timerStatusCtrlRegIndex < NUM_REGS) {
     uint16_t mask = v & 0x000F; // bit0..3 = timer1..4
@@ -206,22 +192,6 @@ static void fc_write_multiple_coils(uint8_t rxSlave,uint8_t* f){
     timers_onCoilWrite(s+i,(uint8_t)(bit?1:0));
   }
 
-  // --- CounterEngine: opdater controlFlags for relevante controlReg-adresser ---
-  for (uint8_t ci = 0; ci < 4; ++ci) {
-    CounterConfig& c = counters[ci];
-    if (!c.enabled) continue;
-    for (uint16_t i = 0; i < q; ++i) {
-      uint16_t addr = s + i;
-      if (c.controlReg == addr) {
-        uint16_t v = holdingRegs[addr];
-        if (v & 0x0008)
-          c.controlFlags |= 0x0008;
-        else
-          c.controlFlags &= ~0x0008;
-        break;
-      }
-    }
-  }
 
   uint8_t resp[6]={rxSlave,FC_WRITE_MULTIPLE_COILS,f[2],f[3],f[4],f[5]};
   sendResponse(resp,6,rxSlave);
@@ -249,7 +219,7 @@ static void fc_write_multiple_regs(uint8_t rxSlave,uint8_t* f){
 
       // Byg aktuel konfiguration (samme som CLI SAVE)
       cfg.magic      = 0xC0DE;
-      cfg.schema     = 5;
+      cfg.schema     = 7;  // Opdateret til schema 7
       cfg.slaveId    = currentSlaveID;
       cfg.serverFlag = serverRunning ? 1 : 0;
       cfg.baud       = currentBaudrate;

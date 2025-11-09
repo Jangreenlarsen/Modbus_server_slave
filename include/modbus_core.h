@@ -21,7 +21,7 @@
 #define MODBUS_SERIAL   Serial1
 #define RS485_DIR_PIN   8
 #define SLAVE_ID        10
-#define BAUDRATE        19200
+#define BAUDRATE        9600
 
 // 🧩 Buffer sizing for RTU stream
 #define RXBUF_SIZE      128
@@ -104,14 +104,14 @@ void cli_loop();
 #include "modbus_counters.h"   // CounterConfig v3
 
 // ============================================================================
-//  EEPROM schema v5 – inkl. timere, counters og GPIO mapping
+//  EEPROM schema v8 – inkl. counter control arrays
 // ============================================================================
 //
-//  Bemærk: schema = 5 bruges til CounterEngine v3 (direction + scale).
+//  Bemærk: schema = 8 tilføjer counterAutoStartEnable[4] array.
 //
 struct PersistConfig {
   uint16_t magic;          // 0xC0DE
-  uint8_t  schema;         // 6 for CounterEngine v3 + timer status/control
+  uint8_t  schema;         // 8 for CounterEngine v3 + individuel reset-on-read + auto-start
   uint8_t  reserved;       // alignment / fremtidigt brug
 
   uint8_t  slaveId;        // 1..247
@@ -143,6 +143,12 @@ struct PersistConfig {
   // Counters (v3)
   uint8_t      counterCount;   // 0..4
   CounterConfig counter[4];    // fuld struktur inkl. scale/direction
+  
+  // --------------------------------------------
+  // Global counter control arrays
+  // --------------------------------------------
+  uint8_t counterResetOnReadEnable[4];  // individuel reset-on-read pr. counter (0/1)
+  uint8_t counterAutoStartEnable[4];    // individuel auto-start pr. counter (0/1)
 
   // GPIO pin-mapping
   int16_t gpioToCoil[NUM_GPIO];   // map pin -> coil index (eller -1 hvis ingen)

@@ -1,11 +1,21 @@
 // ============================================================================
 //  Filnavn : cli_shell.cpp
 //  Projekt  : Modbus RTU Server / CLI
-//  Version  : v3.1.7 (2025-11-09)
+//  Version  : v3.1.9 (2025-11-09)
 //  Forfatter: ChatGPT Automation
 //  Formål   : Interaktiv CLI til Modbus RTU-serveren, inkl. timers, GPIO,
 //             EEPROM-persistens og CounterEngine med HW/SW input-tællere.
 //  Ændringer:
+//    - v3.1.9:
+//        - Counter reset-on-read er nu individuel pr. counter (ikke via controlReg bit 3)
+//        - CLI-kommando: "set counters reset-on-read counter<1-4>:on|off"
+//        - "show config" viser nu "counter<n> reset-on-read ENABLE/DISABLE"
+//        - "show counters" viser reset-on-read status
+//    - v3.1.8:
+//        - Counter control register vises nu i "show config" med fortolkning:
+//            bit0=RESET, bit1=START, bit2=STOP, bit3=Reset-On-Read ENABLE
+//        - "show counters" viser nu også control register status med fortolket værdi
+//        - BUGFIX: Counter controlFlags bit 3 persisterer nu korrekt efter genstart
 //    - v3.1.7:
 //        - Tilføjet globalt timer-status og control-register (fælles for 4 timere):
 //            bit0..bit3 = timer1..4 aktive flag (sticky latch)
@@ -36,7 +46,7 @@
 //    - v3.0.7: Oprindelig CLI med timers, GPIO og persistens
 // ============================================================================
 //
-//  CLI SHELL v3.1.7
+//  CLI SHELL v3.1.9
 //  - Timer syntaks:
 //      set timer <id> mode <1|2|3|4> parameter P1:<high|low> P2:<high|low> [P3:<high|low>]
 //                      T1 <ms> [T2 <ms>] [T3 <ms>] coil <idx>
@@ -378,7 +388,35 @@ static void print_counters_config_block(bool onlyEnabled) {
   if (!any) {
     Serial.println(F("counters (none enabled)"));
   }
+
+  // Vis counter reset-on-read control (individuelt pr. counter)
+  bool showResetOnRead = false;
+  for (uint8_t i = 0; i < 4; ++i) {
+    if (onlyEnabled && !counters[i].enabled) continue;
+    if (counters[i].enabled) {
+      showResetOnRead = true;
+      break;
+    }
+  }
+
+  if (showResetOnRead) {
+    Serial.println(F("counters control"));
+    for (uint8_t i = 0; i < 4; ++i) {
+      const CounterConfig& c = counters[i];
+      if (onlyEnabled && !c.enabled) continue;
+      if (!c.enabled) continue;
+
+      Serial.print(F(" counter")); Serial.print(c.id);
+      Serial.print(F(" reset-on-read "));
+      if (counterResetOnReadEnable[i]) {
+        Serial.println(F("ENABLE"));
+      } else {
+        Serial.println(F("DISABLE"));
+      }
+    }
+  }
 }
+
 
 static void print_gpio_config_block() {
   Serial.println(F("gpio"));
@@ -545,7 +583,34 @@ static void cmd_show(uint8_t ntok, char* tok[]) {
   if (!strcmp(tok[1],"COILS"))        { cli_dump_coils();  print_timer_links(); return; }
   if (!strcmp(tok[1],"INPUTS"))       { cli_dump_inputs(); print_timer_links(); return; }
   if (!strcmp(tok[1],"TIMERS"))       { timers_print_status(); return; }
-  if (!strcmp(tok[1], "COUNTERS"))    { counters_print_status(); return; }
+  if (!strcmp(tok[1], "COUNTERS"))    { 
+    counters_print_status(); 
+    Serial.println();
+    
+    // Vis reset-on-read enable flags
+    bool anyEnabled = false;
+    for (uint8_t i = 0; i < 4; ++i) {
+      if (counters[i].enabled) {
+        anyEnabled = true;
+        break;
+      }
+    }
+    
+    if (anyEnabled) {
+      Serial.println(F("=== COUNTER RESET-ON-READ STATUS ==="));
+      for (uint8_t i = 0; i < 4; ++i) {
+        const CounterConfig& c = counters[i];
+        if (!c.enabled) continue;
+        
+        Serial.print(F("Counter")); Serial.print(c.id);
+        Serial.print(F(" reset-on-read: "));
+        Serial.println(counterResetOnReadEnable[i] ? F("ENABLED") : F("DISABLED"));
+      }
+      Serial.println(F("===================================="));
+    }
+    
+    return; 
+  }
   if (!strcmp(tok[1],"GPIO"))         { cli_show_gpio();   return; }
   if (!strcmp(tok[1],"VERSION")) {
     Serial.print(F("Version: ")); Serial.println(VERSION_STRING);
@@ -791,9 +856,8 @@ if (cfg.edgeMode == 0)
 if (cfg.scale <= 0.0f)
   cfg.scale = 1.0f;
 
-if (cfg.direction != CNT_DIR_UP && cfg.direction != CNT_DIR_DOWN) {
+if (cfg.direction != CNT_DIR_UP && cfg.direction != CNT_DIR_DOWN)
   cfg.direction = CNT_DIR_UP;
-}
 
   // Find "parameter" token
   uint8_t start = 5;
@@ -992,6 +1056,58 @@ static void cmd_set(uint8_t ntok, char* tok[]) {
 
       Serial.print(F("% Unknown parameter: "));
       Serial.println(p);
+    }
+    return;
+  }
+
+  // --- SET COUNTERS reset-on-read <counter1:on|off> [counter2:on|off] ... ---
+  if (!strcmp(tok[0], "SET") && !strcmp(tok[1], "COUNTERS") && ntok >= 3 
+      && !strncasecmp(tok[2], "reset-on-read", 13)) {
+    // Syntax: set counters reset-on-read counter1:on counter2:off counter3:on counter4:off
+    if (ntok < 3) {
+      Serial.println(F("Usage: set counters reset-on-read counter<1-4>:<on|off> [...]"));
+      return;
+    }
+    for (uint8_t i = 3; i < ntok; i++) {
+      char* p = tok[i];
+      
+      // Parse "counter1:on" eller "counter2:off"
+      if (!strncasecmp(p, "counter", 7)) {
+        char* colon = strchr(p, ':');
+        if (!colon) {
+          Serial.print(F("% Invalid format: "));
+          Serial.println(p);
+          continue;
+        }
+        
+        uint8_t counterNum = p[7] - '0';  // '1'..'4' -> 1..4
+        if (counterNum < 1 || counterNum > 4) {
+          Serial.print(F("% Invalid counter number: "));
+          Serial.println(counterNum);
+          continue;
+        }
+        
+        char* value = colon + 1;
+        uint8_t idx = counterNum - 1;  // 0..3
+        
+        if (!strcasecmp(value, "on") || !strcasecmp(value, "enable") || !strcmp(value, "1")) {
+          counterResetOnReadEnable[idx] = 1;
+          Serial.print(F("Counter"));
+          Serial.print(counterNum);
+          Serial.println(F(" reset-on-read ENABLED"));
+        } else if (!strcasecmp(value, "off") || !strcasecmp(value, "disable") || !strcmp(value, "0")) {
+          counterResetOnReadEnable[idx] = 0;
+          Serial.print(F("Counter"));
+          Serial.print(counterNum);
+          Serial.println(F(" reset-on-read DISABLED"));
+        } else {
+          Serial.print(F("% Invalid value (use on/off): "));
+          Serial.println(value);
+        }
+      } else {
+        Serial.print(F("% Unknown parameter: "));
+        Serial.println(p);
+      }
     }
     return;
   }
@@ -1424,6 +1540,8 @@ static void cmd_help() {
   Serial.println(F("   overload:<reg> input:<di_index> count-reg:<reg_index> control-reg:<ctrlReg>"));
   Serial.println(F("   direction:<up|down> scale:<float>"));
   Serial.println(F("   debounce:<on|off> [debounce-ms:<ms>]"));
+  Serial.println(F(" set counters reset-on-read counter<1-4>:<on|off> [...]"));
+  Serial.println(F("   - Enable/disable individual counter reset-on-read"));
   Serial.println(F(" no set counter <id>         - remove counter from configuration"));
   Serial.println(F(" reset counter <id>          - reset selected counter"));
   Serial.println(F(" clear counters              - reset all counters and overflow flags"));
@@ -1431,7 +1549,7 @@ static void cmd_help() {
   Serial.println(F("  bit0 = reset  (load start-value, clear overflow)"));
   Serial.println(F("  bit1 = start  (start counting)"));
   Serial.println(F("  bit2 = stop   (stop counting)"));
-  Serial.println(F("  bit3 = ROR    (reset-on-read) Auto-reset ved Modbus-read"));
+  Serial.println(F("  NOTE: bit3 (reset-on-read) is now set via 'set counters reset-on-read'"));
   Serial.println(F(" ---"));
   Serial.println();
   Serial.println(F(" Examples:"));
@@ -1463,7 +1581,7 @@ static void cli_print_extended_help() {
   Serial.println(F(" gpio unmap <pin>                    - unmap GPIO pin"));
   Serial.println(F(" show gpio                           - show active GPIO mappings"));
   Serial.println(F(" show timers                         - show active timer mappings/status"));
-  Serial.println(F(" show counters                       - show active counters mappings/status"));
+  Serial.println(F(" show counters                       - show active counters + control register status"));
 }
 
 // ---------- Counter helper commands ----------

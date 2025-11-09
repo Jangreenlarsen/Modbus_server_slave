@@ -21,7 +21,7 @@
 #define MAX_STATIC_REGS  32
 #define MAX_STATIC_COILS 64
 #define SLAVE_ID         10
-#define BAUDRATE         9600
+#define BAUDRATE         19200
 
 // ---------------------------------------------------------------------------
 //  Globale buffere

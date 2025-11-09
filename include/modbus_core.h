@@ -21,7 +21,7 @@
 #define MODBUS_SERIAL   Serial1
 #define RS485_DIR_PIN   8
 #define SLAVE_ID        10
-#define BAUDRATE        9600
+#define BAUDRATE        19200
 
 // 🧩 Buffer sizing for RTU stream
 #define RXBUF_SIZE      128

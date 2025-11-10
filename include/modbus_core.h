@@ -2,7 +2,7 @@
 //  Filnavn : modbus_core.h
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.1.2-patch1 (2025-11-03)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Centrale konstanter, Modbus FC-definitioner, RTU-buffer, 
 //             hardwarekonfiguration og PersistConfig (EEPROM).
 //  Ændringer:

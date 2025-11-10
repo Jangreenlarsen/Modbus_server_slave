@@ -2,7 +2,7 @@
 //  Filnavn : modbus_counters.h
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.2.0 (2025-11-09)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Header for CounterEngine v3 med 4 uafhængige input-tællere,
 //             inkl. prescaler, bitwidth, overflow-flag, retning, scaling,
 //             soft-control via controlReg (start/stop/reset) og debounce.

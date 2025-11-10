@@ -2,7 +2,7 @@
 //  Filnavn : modbus_counters.cpp
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.1.4-patch3 (2025-11-05)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : CounterEngine v3 med 4 uafhængige input-tællere.
 //             - Edge-detektering (rising/falling/both)
 //             - Prescaler

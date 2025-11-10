@@ -2,7 +2,7 @@
 //  Filnavn : cli_shell.cpp
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.1.9 (2025-11-09)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Interaktiv CLI til Modbus RTU-serveren, inkl. timers, GPIO,
 //             EEPROM-persistens og CounterEngine med HW/SW input-tællere.
 //  Ændringer:

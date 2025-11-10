@@ -3,7 +3,7 @@
 //  Filnavn : version.h
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.2.0 (2025-11-10)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Global versions-info og ændringshistorik
 //  Ændringer:
 //    - v3.2.0: CounterEngine frequency measurement (freq-reg), raw register

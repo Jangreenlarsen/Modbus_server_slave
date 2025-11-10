@@ -2,7 +2,7 @@
 //  Filnavn : modbus_fc.cpp
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.1.3-patch1 (2025-11-04)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Modbus function-code-håndtering med CLEAN init
 //  Ændringer:
 //    - v3.1.3-patch1: Fjernet demo-init i initModbus(); kalder nu modbus_init_globals()

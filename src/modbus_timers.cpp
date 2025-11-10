@@ -2,7 +2,7 @@
 //  Filnavn : modbus_timers.cpp
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.0.7-patch4 (2025-11-03)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Timerengine for 4 uafhængige timere med coil-styring,
 //             alarm- og timeout-overvågning samt CLI statusprint.
 //  Ændringer:

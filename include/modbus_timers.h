@@ -2,7 +2,7 @@
 //  Filnavn : modbus_timers.h
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.0.7-patch4 (2025-11-03)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Header for timer-engine med coil-styring og alarm/timeout
 //  Ændringer:
 //    - v3.0.7-patch4: Tilføjet alarm/timeout-felter og CLI helpers

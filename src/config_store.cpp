@@ -2,7 +2,7 @@
 //  Filnavn : config_store.cpp
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.1.7 (CounterEngine v3 + Timer status/control)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : EEPROM persistence – schema v5 (CounterEngine v3 + debounce)
 // ============================================================================
 #include "modbus_core.h"

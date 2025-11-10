@@ -2,7 +2,7 @@
 //  Filnavn : modbus_utils.cpp
 //  Projekt  : Modbus RTU Server / CLI
 //  Version  : v3.1.3-patch1 (2025-11-03)
-//  Forfatter: ChatGPT Automation
+//  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Diverse hjælpefunktioner – CRC, bitfelter, RTU-gap m.m.
 // ============================================================================
 

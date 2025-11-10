@@ -32,6 +32,7 @@ static bool checkCrc(const PersistConfig &cfg) {
   return (c == cfg.crc);
 }
 
+static bool isSupportedBaud(unsigned long nb) __attribute__((unused));
 static bool isSupportedBaud(unsigned long nb) {
   const unsigned long rates[] = {
     300,600,1200,2400,4800,9600,14400,19200,38400,57600,115200
@@ -108,9 +109,10 @@ bool configSave(const PersistConfig &cfgIn) {
   // Gem counter reset-on-read enable flags
   for (uint8_t i = 0; i < 4; ++i) {
     tmp.counterResetOnReadEnable[i] = counterResetOnReadEnable[i];
+    tmp.counterAutoStartEnable[i] = counterAutoStartEnable[i];
   }
 
-  tmp.schema = 7;
+  tmp.schema = 8;  // Fixed: Must match schema check in configLoad()
   computeFillCrc(tmp);
 
   EEPROM.put(0, tmp);
@@ -182,12 +184,13 @@ for (uint8_t i = 0; i < coilStaticCount && i < MAX_STATIC_COILS; i++) {
 
   // --- Counters ---
   counters_init();
-  
-  // Gendan counter reset-on-read enable flags
+
+  // Gendan counter reset-on-read enable flags og auto-start enable flags
   for (uint8_t i = 0; i < 4; ++i) {
     counterResetOnReadEnable[i] = cfg.counterResetOnReadEnable[i];
+    counterAutoStartEnable[i] = cfg.counterAutoStartEnable[i];
   }
-  
+
   CounterConfig tmp[4];
   for (uint8_t i = 0; i < cfg.counterCount && i < 4; i++) {
     tmp[i] = cfg.counter[i];
@@ -195,6 +198,17 @@ for (uint8_t i = 0; i < coilStaticCount && i < MAX_STATIC_COILS; i++) {
 
   for (uint8_t i = 0; i < cfg.counterCount && i < 4; i++)
     counters_config_set(tmp[i].id, tmp[i]);
+
+  // Sync bit 3 (reset-on-read) i controlReg fra counterResetOnReadEnable array
+  for (uint8_t i = 0; i < 4; ++i) {
+    if (counters[i].enabled && counters[i].controlReg < NUM_REGS) {
+      if (counterResetOnReadEnable[i]) {
+        holdingRegs[counters[i].controlReg] |= 0x0008;  // set bit 3
+      } else {
+        holdingRegs[counters[i].controlReg] &= ~0x0008; // clear bit 3
+      }
+    }
+  }
 
   // --- GPIO mapping ---
   for (uint8_t pin=0; pin<NUM_GPIO; ++pin) {

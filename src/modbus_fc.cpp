@@ -177,6 +177,14 @@ static void fc_write_single_reg(uint8_t rxSlave,uint8_t* f){
     }
   }
 
+  // --- CounterEngine: sync bit3 (reset-on-read) to sticky EEPROM flag ---
+  for (uint8_t i = 0; i < 4; ++i) {
+    if (counters[i].enabled && a == counters[i].controlReg && counters[i].controlReg < NUM_REGS) {
+      // bit 3 i control register styrer reset-on-read
+      counterResetOnReadEnable[i] = (v & 0x0008) ? 1 : 0;
+    }
+  }
+
   uint8_t resp[6]={rxSlave,FC_WRITE_SINGLE_REG,f[2],f[3],f[4],f[5]};
   sendResponse(resp,6,rxSlave);
 }

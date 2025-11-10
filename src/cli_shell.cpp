@@ -7,10 +7,13 @@
 //             EEPROM-persistens og CounterEngine med HW/SW input-tællere.
 //  Ændringer:
 //    - v3.1.9:
-//        - Counter reset-on-read er nu individuel pr. counter (ikke via controlReg bit 3)
-//        - CLI-kommando: "set counters reset-on-read counter<1-4>:on|off"
+//        - Counter reset-on-read er nu individuel pr. counter (synkroniseres med controlReg bit 3)
+//        - CLI-kommando: "set counter <id> reset-on-read ENABLE|DISABLE"
+//        - CLI-kommando: "set counter <id> start ENABLE|DISABLE" (auto-start ved boot)
 //        - "show config" viser nu "counter<n> reset-on-read ENABLE/DISABLE"
 //        - "show counters" viser reset-on-read status
+//        - Control register (alle bits) kan skrives direkte via Modbus FC6
+//        - Kun bit 3 (reset-on-read) gemmes til EEPROM og persisterer ved reboot
 //    - v3.1.8:
 //        - Counter control register vises nu i "show config" med fortolkning:
 //            bit0=RESET, bit1=START, bit2=STOP, bit3=Reset-On-Read ENABLE
@@ -112,12 +115,46 @@ bool cli_active() { return s_cli; }
 
 static const bool CLI_DEBUG_ECHO = false; // set true for RX echo debug
 
-static void cmd_set_timers(uint8_t ntok, char* tok[]);
+// ---------- Command History (last 3 commands, optimized for RAM) ----------
+#define CMD_HISTORY_SIZE 3
+#define CMD_LINE_MAX 128
+static char cmdHistory[CMD_HISTORY_SIZE][CMD_LINE_MAX];
+static uint8_t cmdHistoryCount = 0;    // Total commands stored (0..3)
+static uint8_t cmdHistoryWrite = 0;    // Next write position (circular)
+static int8_t cmdHistoryNav = -1;      // Current navigation position (-1 = not navigating)
 
 // ---------- Prompt ----------
-static void print_prompt() {  Serial.print(cliHostname);
-                              Serial.print(F("# "));
-                              Serial.print(F("\r\n")); }
+static void print_prompt() {  Serial.print(F("\r\n"));
+                              Serial.print(cliHostname);
+                              Serial.print(F("# ")); }
+
+// ---------- Command History Functions ----------
+static void addToHistory(const char* cmd) {
+  if (cmd == NULL || cmd[0] == '\0') return;
+
+  // Don't add if same as last command
+  if (cmdHistoryCount > 0) {
+    uint8_t lastIdx = (cmdHistoryWrite + CMD_HISTORY_SIZE - 1) % CMD_HISTORY_SIZE;
+    if (strcmp(cmdHistory[lastIdx], cmd) == 0) return;
+  }
+
+  strncpy(cmdHistory[cmdHistoryWrite], cmd, sizeof(cmdHistory[0]) - 1);
+  cmdHistory[cmdHistoryWrite][sizeof(cmdHistory[0]) - 1] = '\0';
+
+  cmdHistoryWrite = (cmdHistoryWrite + 1) % CMD_HISTORY_SIZE;
+  if (cmdHistoryCount < CMD_HISTORY_SIZE) cmdHistoryCount++;
+
+  cmdHistoryNav = -1;  // Reset navigation
+}
+
+static const char* getHistoryCmd(int8_t offset) {
+  if (cmdHistoryCount == 0) return NULL;
+  if (offset < 0 || offset >= cmdHistoryCount) return NULL;
+
+  // Calculate index: most recent is at (write - 1), going backwards
+  int idx = (cmdHistoryWrite - 1 - offset + CMD_HISTORY_SIZE) % CMD_HISTORY_SIZE;
+  return cmdHistory[idx];
+}
 
 // -------------------- [101–200] --------------------
 
@@ -360,7 +397,17 @@ static void print_counters_config_block(bool onlyEnabled) {
     Serial.print(F(" prescaler=")); Serial.print((int)c.prescaler);
     Serial.print(F(" res=")); Serial.print((int)c.bitWidth);
     Serial.print(F(" dir=")); Serial.print(c.direction == CNT_DIR_DOWN ? F("down") : F("up"));
-    Serial.print(F(" scale=")); Serial.print(c.scale, 3);
+
+    // Format scale float manually (Serial.print float not always supported)
+    Serial.print(F(" scale="));
+    int scaleInt = (int)c.scale;
+    int scaleDec = (int)((c.scale - scaleInt) * 1000);
+    if (scaleDec < 0) scaleDec = -scaleDec;
+    Serial.print(scaleInt); Serial.print('.');
+    if (scaleDec < 100) Serial.print('0');
+    if (scaleDec < 10) Serial.print('0');
+    Serial.print(scaleDec);
+
     Serial.print(F(" input=")); Serial.print(c.inputIndex);
     Serial.print(F(" reg=")); Serial.print(c.regIndex);
     Serial.print(F(" overload="));
@@ -853,14 +900,16 @@ if (cfg.prescaler == 0)
 if (cfg.edgeMode == 0)
   cfg.edgeMode = CNT_EDGE_RISING;
 
-if (cfg.scale <= 0.0f)
+if (cfg.scale <= 0.0f) {
   cfg.scale = 1.0f;
+}
 
-if (cfg.direction != CNT_DIR_UP && cfg.direction != CNT_DIR_DOWN)
+if (cfg.direction != CNT_DIR_UP && cfg.direction != CNT_DIR_DOWN) {
   cfg.direction = CNT_DIR_UP;
+}
 
-  // Find "parameter" token
-  uint8_t start = 5;
+// Find "parameter" token
+uint8_t start = 5;
   for (uint8_t i = 5; i < ntok; ++i) {
     if (iequals(tok[i], "parameter")) {
       start = i + 1;
@@ -1056,58 +1105,6 @@ static void cmd_set(uint8_t ntok, char* tok[]) {
 
       Serial.print(F("% Unknown parameter: "));
       Serial.println(p);
-    }
-    return;
-  }
-
-  // --- SET COUNTERS reset-on-read <counter1:on|off> [counter2:on|off] ... ---
-  if (!strcmp(tok[0], "SET") && !strcmp(tok[1], "COUNTERS") && ntok >= 3 
-      && !strncasecmp(tok[2], "reset-on-read", 13)) {
-    // Syntax: set counters reset-on-read counter1:on counter2:off counter3:on counter4:off
-    if (ntok < 3) {
-      Serial.println(F("Usage: set counters reset-on-read counter<1-4>:<on|off> [...]"));
-      return;
-    }
-    for (uint8_t i = 3; i < ntok; i++) {
-      char* p = tok[i];
-      
-      // Parse "counter1:on" eller "counter2:off"
-      if (!strncasecmp(p, "counter", 7)) {
-        char* colon = strchr(p, ':');
-        if (!colon) {
-          Serial.print(F("% Invalid format: "));
-          Serial.println(p);
-          continue;
-        }
-        
-        uint8_t counterNum = p[7] - '0';  // '1'..'4' -> 1..4
-        if (counterNum < 1 || counterNum > 4) {
-          Serial.print(F("% Invalid counter number: "));
-          Serial.println(counterNum);
-          continue;
-        }
-        
-        char* value = colon + 1;
-        uint8_t idx = counterNum - 1;  // 0..3
-        
-        if (!strcasecmp(value, "on") || !strcasecmp(value, "enable") || !strcmp(value, "1")) {
-          counterResetOnReadEnable[idx] = 1;
-          Serial.print(F("Counter"));
-          Serial.print(counterNum);
-          Serial.println(F(" reset-on-read ENABLED"));
-        } else if (!strcasecmp(value, "off") || !strcasecmp(value, "disable") || !strcmp(value, "0")) {
-          counterResetOnReadEnable[idx] = 0;
-          Serial.print(F("Counter"));
-          Serial.print(counterNum);
-          Serial.println(F(" reset-on-read DISABLED"));
-        } else {
-          Serial.print(F("% Invalid value (use on/off): "));
-          Serial.println(value);
-        }
-      } else {
-        Serial.print(F("% Unknown parameter: "));
-        Serial.println(p);
-      }
     }
     return;
   }
@@ -1349,6 +1346,68 @@ if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "COIL") &
       return;
     }
 
+    // "set counter <id> reset-on-read ENABLE/DISABLE"
+    if (ntok >= 4 && !strcasecmp(tok[3], "reset-on-read")) {
+      if (ntok < 5) {
+        Serial.println(F("Usage: set counter <id> reset-on-read ENABLE|DISABLE"));
+        return;
+      }
+      uint8_t id = (uint8_t)strtoul(tok[2], nullptr, 10);
+      if (id < 1 || id > 4) {
+        Serial.println(F("% Invalid counter id (1..4)"));
+        return;
+      }
+      uint8_t idx = id - 1;
+
+      if (!strcasecmp(tok[4], "ENABLE")) {
+        counterResetOnReadEnable[idx] = 1;
+        // Sync bit 3 in control register
+        if (counters[idx].enabled && counters[idx].controlReg < NUM_REGS) {
+          holdingRegs[counters[idx].controlReg] |= 0x0008;
+        }
+        Serial.print(F("Counter ")); Serial.print(id);
+        Serial.println(F(" reset-on-read ENABLED"));
+      } else if (!strcasecmp(tok[4], "DISABLE")) {
+        counterResetOnReadEnable[idx] = 0;
+        // Clear bit 3 in control register
+        if (counters[idx].enabled && counters[idx].controlReg < NUM_REGS) {
+          holdingRegs[counters[idx].controlReg] &= ~0x0008;
+        }
+        Serial.print(F("Counter ")); Serial.print(id);
+        Serial.println(F(" reset-on-read DISABLED"));
+      } else {
+        Serial.println(F("% Use ENABLE or DISABLE"));
+      }
+      return;
+    }
+
+    // "set counter <id> start ENABLE/DISABLE"
+    if (ntok >= 4 && !strcasecmp(tok[3], "start")) {
+      if (ntok < 5) {
+        Serial.println(F("Usage: set counter <id> start ENABLE|DISABLE"));
+        return;
+      }
+      uint8_t id = (uint8_t)strtoul(tok[2], nullptr, 10);
+      if (id < 1 || id > 4) {
+        Serial.println(F("% Invalid counter id (1..4)"));
+        return;
+      }
+      uint8_t idx = id - 1;
+
+      if (!strcasecmp(tok[4], "ENABLE")) {
+        counterAutoStartEnable[idx] = 1;
+        Serial.print(F(" Counter ")); Serial.print(id);
+        Serial.println(F(" auto-start ENABLED"));
+      } else if (!strcasecmp(tok[4], "DISABLE")) {
+        counterAutoStartEnable[idx] = 0;
+        Serial.print(F(" Counter ")); Serial.print(id);
+        Serial.println(F(" auto-start DISABLED"));
+      } else {
+        Serial.println(F("% Use ENABLE or DISABLE"));
+      }
+      return;
+    }
+
     // Normal "set counter <id> ..." (implicit enable)
     cmd_set_counter(ntok, tok);
     return;
@@ -1540,8 +1599,10 @@ static void cmd_help() {
   Serial.println(F("   overload:<reg> input:<di_index> count-reg:<reg_index> control-reg:<ctrlReg>"));
   Serial.println(F("   direction:<up|down> scale:<float>"));
   Serial.println(F("   debounce:<on|off> [debounce-ms:<ms>]"));
-  Serial.println(F(" set counters reset-on-read counter<1-4>:<on|off> [...]"));
-  Serial.println(F("   - Enable/disable individual counter reset-on-read"));
+  Serial.println(F(" set counter <id> reset-on-read ENABLE|DISABLE"));
+  Serial.println(F("   - Enable/disable counter reset-on-read (bit 3 in control register)"));
+  Serial.println(F(" set counter <id> start ENABLE|DISABLE"));
+  Serial.println(F("   - Enable/disable counter auto-start on boot"));
   Serial.println(F(" no set counter <id>         - remove counter from configuration"));
   Serial.println(F(" reset counter <id>          - reset selected counter"));
   Serial.println(F(" clear counters              - reset all counters and overflow flags"));
@@ -1549,7 +1610,8 @@ static void cmd_help() {
   Serial.println(F("  bit0 = reset  (load start-value, clear overflow)"));
   Serial.println(F("  bit1 = start  (start counting)"));
   Serial.println(F("  bit2 = stop   (stop counting)"));
-  Serial.println(F("  NOTE: bit3 (reset-on-read) is now set via 'set counters reset-on-read'"));
+  Serial.println(F("  bit3 = reset-on-read enable (sticky - saved to EEPROM)"));
+  Serial.println(F("  NOTE: All bits writable via Modbus FC6, but only bit3 persists"));
   Serial.println(F(" ---"));
   Serial.println();
   Serial.println(F(" Examples:"));
@@ -1700,8 +1762,10 @@ static void cmd_gpio(uint8_t ntok, char* tok[]) {
 
 // ---------- CLI Loop ----------
 void cli_loop() {
-  static char line[512];
+  static char line[CMD_LINE_MAX];
   static uint8_t idx = 0;
+  static char savedLine[CMD_LINE_MAX];  // Save current input when navigating history
+  static uint8_t escState = 0;  // 0=normal, 1=got ESC, 2=got ESC[
 
   while (Serial.available()) {
     char c = Serial.read();
@@ -1716,13 +1780,116 @@ void cli_loop() {
       Serial.println(F("]"));
     }
 
+    // ANSI escape sequence state machine
+    if (escState == 0 && c == 0x1B) {  // ESC
+      escState = 1;
+      continue;
+    }
+    if (escState == 1 && c == '[') {   // ESC [
+      escState = 2;
+      continue;
+    }
+    if (escState == 2) {
+      escState = 0;
+
+      // Arrow Up (ESC [ A)
+      if (c == 'A') {
+        if (cmdHistoryCount == 0) continue;
+
+        // Save current line on first navigation
+        if (cmdHistoryNav == -1) {
+          strncpy(savedLine, line, sizeof(savedLine));
+          savedLine[sizeof(savedLine) - 1] = '\0';
+          cmdHistoryNav = 0;
+        } else if (cmdHistoryNav < cmdHistoryCount - 1) {
+          cmdHistoryNav++;
+        } else {
+          continue;  // Already at oldest command
+        }
+
+        const char* histCmd = getHistoryCmd(cmdHistoryNav);
+        if (histCmd) {
+          // Clear current line on terminal
+          while (idx > 0) {
+            Serial.write(8); Serial.write(' '); Serial.write(8);
+            idx--;
+          }
+          // Copy and display history command
+          strncpy(line, histCmd, sizeof(line) - 1);
+          line[sizeof(line) - 1] = '\0';
+          idx = strlen(line);
+          Serial.print(line);
+        }
+        continue;
+      }
+
+      // Arrow Down (ESC [ B)
+      if (c == 'B') {
+        if (cmdHistoryNav <= -1) continue;  // Not navigating
+
+        if (cmdHistoryNav > 0) {
+          cmdHistoryNav--;
+          const char* histCmd = getHistoryCmd(cmdHistoryNav);
+          if (histCmd) {
+            // Clear current line on terminal
+            while (idx > 0) {
+              Serial.write(8); Serial.write(' '); Serial.write(8);
+              idx--;
+            }
+            // Copy and display history command
+            strncpy(line, histCmd, sizeof(line) - 1);
+            line[sizeof(line) - 1] = '\0';
+            idx = strlen(line);
+            Serial.print(line);
+          }
+        } else {
+          // Restore saved line (back to current input)
+          cmdHistoryNav = -1;
+          while (idx > 0) {
+            Serial.write(8); Serial.write(' '); Serial.write(8);
+            idx--;
+          }
+          strncpy(line, savedLine, sizeof(line));
+          idx = strlen(line);
+          Serial.print(line);
+        }
+        continue;
+      }
+
+      // Ignore other escape sequences
+      continue;
+    }
+
+    // Reset escape state if we got something else
+    if (escState > 0) escState = 0;
+
+    // Handle backspace (ASCII 8 or 127)
+    if (c == 8 || c == 127) {
+      if (idx > 0) {
+        idx--;
+        // Send backspace, space, backspace to erase character on terminal
+        Serial.write(8);   // move cursor back
+        Serial.write(' '); // overwrite with space
+        Serial.write(8);   // move cursor back again
+      }
+      continue;
+    }
+
     if (c == '\r' || c == '\n') {
       if (idx == 0) {
         print_prompt();
+        cmdHistoryNav = -1;  // Reset history navigation
         continue;
       }
       line[idx] = '\0';
+
+      // Save original command before uppercasing
+      char originalLine[CMD_LINE_MAX];
+      strncpy(originalLine, line, sizeof(originalLine) - 1);
+      originalLine[sizeof(originalLine) - 1] = '\0';
+
       idx = 0;
+      cmdHistoryNav = -1;  // Reset history navigation
 
       toupper_ascii(line);
       for (char* s = line; *s; ++s) {
@@ -1738,6 +1905,9 @@ void cli_loop() {
         continue;
       }
       normalize_tokens(ntok, tok);
+
+      // Add to history (after normalization, but before execution)
+      addToHistory(originalLine);
 
       if (!strcmp(tok[0],"EXIT")) {
         s_cli = false;
@@ -1778,9 +1948,11 @@ void cli_loop() {
 
       print_prompt();
     }
-    
+
     else if (c >= 32 && c < 127 && idx < sizeof(line) - 1) {
       line[idx++] = c;
+      // Echo character back to terminal (remote echo)
+      Serial.write(c);
     }
   }
 }
@@ -1805,6 +1977,18 @@ void cli_try_enter() {
       Serial.println(F("]"));
     }
 
+    // Handle backspace (ASCII 8 or 127)
+    if (c == 8 || c == 127) {
+      if (idx > 0) {
+        idx--;
+        // Send backspace, space, backspace to erase character on terminal
+        Serial.write(8);   // move cursor back
+        Serial.write(' '); // overwrite with space
+        Serial.write(8);   // move cursor back again
+      }
+      continue;
+    }
+
     if (c == '\r' || c == '\n') {
       if (idx == 0) continue;
       buf[idx] = '\0';
@@ -1813,12 +1997,14 @@ void cli_try_enter() {
       toupper_ascii(buf);
       if (!strcmp(buf,"CLI")) {
         s_cli = true;
-        Serial.println(F("Entering CLI mode. Type HELP for commands."));
+        Serial.println(F("\r\nEntering CLI mode. Type HELP for commands."));
         print_prompt();
       }
     }
     else if (c >= 32 && c < 127 && idx < sizeof(buf) - 1) {
       buf[idx++] = c;
+      // Echo character back to terminal (remote echo)
+      Serial.write(c);
     }
   }
 }

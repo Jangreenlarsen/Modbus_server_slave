@@ -72,7 +72,7 @@ static uint8_t sanitizeEdge(uint8_t e) {
 
 static uint8_t sanitizePrescaler(uint8_t p) {
   if (p == 0) return 1;
-  if (p > 256) return 256;
+  if (p > 255) return 255;
   return p;
 }
 
@@ -476,7 +476,14 @@ void counters_print_status() {
     sprintf(buf, "%-5d| ", c.overflowReg); Serial.print(buf);
     sprintf(buf, "%-5d| ", c.controlReg); Serial.print(buf);
     sprintf(buf, "%-6s| ", dirStr); Serial.print(buf);
-    sprintf(buf, "%-7.3f| ", c.scale); Serial.print(buf);
+
+    // Format scale float manually (sprintf %f not supported on all Arduino boards)
+    int scaleInt = (int)c.scale;
+    int scaleDec = (int)((c.scale - scaleInt) * 1000);
+    if (scaleDec < 0) scaleDec = -scaleDec;  // absolute value for decimal part
+    sprintf(buf, "%d.%03d  | ", scaleInt, scaleDec);
+    Serial.print(buf);
+
     sprintf(buf, "%-5d| ", c.regIndex); Serial.print(buf);
     sprintf(buf, "%-4s| ", dStr); Serial.print(buf);
     sprintf(buf, "%-5d| ", c.debounceTimeMs); Serial.print(buf);

@@ -16,8 +16,12 @@
 #define VERSION_MAJOR    3
 #define VERSION_MINOR    1
 #define VERSION_PATCH    9
+#ifndef VERSION_STRING
 #define VERSION_STRING  "v3.1.9"
+#endif
+#ifndef VERSION_BUILD
 #define VERSION_BUILD   "20251109"
+#endif
 
 // ============================================================================
 //  CHANGELOG (uddrag)

@@ -1,140 +1,261 @@
-# TODO Checklist - Modbus RTU Server Migration
+# TODO - Modbus RTU Server v3.2.0
 
-## ✅ Færdige Opgaver
+**Status:** ✅ Core project COMPLETE
+**Fokus:** Future enhancements and optimizations
 
-- [x] PlatformIO projektstruktur oprettet
-- [x] platformio.ini konfigureret til Arduino Mega 2560
-- [x] main.cpp konverteret fra .ino format
-- [x] Alle header filer (.h) kopieret til include/
-- [x] README og dokumentation oprettet
-- [x] .gitignore tilføjet
-- [x] Installation guide skrevet
+---
 
-## ❌ Manglende Filer (KRITISK)
+## ✅ Completed (v3.2.0)
 
-Du skal tilføje disse implementeringsfiler i `src/` mappen:
+### Core Implementation
+- [x] Modbus RTU Server (FC01-06, FC0F-10)
+- [x] RS-485 direction control
+- [x] CRC16 validation
+- [x] CLI system (256 char buffer, history, echo, backspace)
+- [x] TimerEngine v2 (4 modes, global status/ctrl)
+- [x] CounterEngine v3 (scale, direction, debounce)
+- [x] EEPROM persistence (schema v9)
+- [x] GPIO management
+- [x] Static reg/coil configuration
 
-- [ ] **modbus_core.cpp**
-  - Indeholder: initModbus(), processModbusFrame(), modbusLoop()
-  - CRC16 beregning
-  - RS485 direction control
-  - Modbus function code handlers (FC01-FC06, FC15-FC16)
+### v3.2.0 Features
+- [x] Counter frequency measurement (Hz)
+- [x] Configurable raw register
+- [x] Consistent parameter naming (index-reg, raw-reg, freq-reg, etc.)
+- [x] Frequency stability improvements
+- [x] CLI usability improvements
+- [x] Backward compatibility for old parameter names
+- [x] Updated manual (HTML)
 
-- [ ] **modbus_globals.cpp**
-  - Implementering af globale arrays og variabler
-  - coils[], discreteInputs[], holdingRegs[], inputRegs[]
-  - Statistik variabler
+### Documentation
+- [x] Modbus server V3.2.0 Manual (dansk)
+- [x] README.md
+- [x] INSTALLATION.md
+- [x] PLATFORMIO_REFERENCE.md
+- [x] STATUS.md
+- [x] TODO.md
 
-- [ ] **modbus_utils.cpp**
-  - Utility funktioner: bitReadArray(), bitWriteArray(), packBits()
-  - calculateCRC16()
-  - rtuGapUs()
-  - printHex()
+### Git & Version Control
+- [x] Git repository initialized
+- [x] GitHub remote repository
+- [x] Version tagging (v3.2.0)
+- [x] .gitignore configured
 
-- [ ] **modbus_timers.cpp**
-  - TimerEngine implementering
-  - timers_init(), timers_loop()
-  - Timer mode logik (One-shot, Monostable, Astable, Trigger)
-  - timers_config_set(), timers_get()
+---
 
-- [ ] **modbus_counters.cpp**
-  - CounterEngine v3 implementering
-  - counters_init(), counters_loop()
-  - Edge detection med debounce
-  - Overflow/underflow håndtering
-  - Scaling og direction
+## 🔮 Future Enhancements (Nice-to-Have)
 
-- [ ] **cli.cpp**
-  - CLI (Command Line Interface) implementering
-  - Kommando parsing
-  - Show/set kommandoer
-  - Help system
+### Testing & Quality Assurance
+- [ ] **Unit Tests**
+  - Test framework (Unity/ArduinoUnit)
+  - Counter edge detection tests
+  - Timer mode tests
+  - CRC16 validation tests
+  - EEPROM save/load tests
 
-- [ ] **eeprom_config.cpp**
-  - EEPROM persistence
-  - configLoad(), configSave(), configDefaults()
-  - configApply()
-  - CRC checksum
+- [ ] **Integration Tests**
+  - Modbus protocol compliance tests
+  - RS-485 communication tests
+  - CLI command tests
 
-## 🔧 Næste Skridt
+- [ ] **Performance Profiling**
+  - Response time measurements
+  - RAM usage optimization
+  - Flash optimization
+  - Interrupt latency profiling
 
-### 1. Kopier .cpp filer (FØRST)
-```bash
-# Fra dit Arduino projekt til PlatformIO:
-cp /path/to/arduino/projekt/*.cpp /path/to/platformio/src/
-```
+### Hardware Variants
+- [ ] **ESP32 Port**
+  - Modbus TCP/IP support
+  - WiFi configuration via web interface
+  - OTA (Over-The-Air) updates
+  - Dual UART for Modbus RTU + TCP
 
-### 2. Test build
-```bash
-pio run
-```
+- [ ] **Modbus TCP/IP (Ethernet)**
+  - W5500 Ethernet module support
+  - TCP server implementation
+  - Web interface for configuration
 
-### 3. Fix eventuelle fejl
-- Check #include paths
-- Check function declarations
-- Check missing dependencies
+### Advanced Features
+- [ ] **MQTT Integration**
+  - Publish counter/timer status to MQTT broker
+  - Subscribe to control commands
+  - JSON payload format
 
-### 4. Test upload
-```bash
-pio run -t upload
-```
+- [ ] **Web Interface**
+  - Real-time dashboard
+  - Configuration editor
+  - Log viewer
+  - Firmware update interface
 
-### 5. Test Serial Monitor
-```bash
-pio device monitor
-```
+- [ ] **Data Logging**
+  - SD card logging
+  - Circular buffer in RAM
+  - Log download via CLI or web
 
-## 📋 Valideringsliste
+- [ ] **Enhanced CLI**
+  - Tab completion
+  - Command syntax highlighting
+  - Multi-line commands
+  - Scripting support
 
-Efter tilføjelse af .cpp filer, test:
+- [ ] **Modbus Gateway Mode**
+  - Multi-slave gateway
+  - Protocol translation (RTU ↔ TCP)
+  - Slave device management
 
-- [ ] Projekt kompilerer uden fejl
-- [ ] Upload virker til Arduino Mega
-- [ ] Serial Monitor viser startup-beskeder
-- [ ] LED blinker (heartbeat)
-- [ ] CLI kan aktiveres med "CLI" kommando
-- [ ] Modbus server starter
-- [ ] EEPROM config loader/gemmes korrekt
+### Monitoring & Diagnostics
+- [ ] **Advanced Diagnostics**
+  - Bus traffic statistics
+  - Error rate monitoring
+  - Performance metrics
+  - Memory leak detection
 
-## 🐛 Kendte Problemer at Holde Øje Med
+- [ ] **Watchdog & Recovery**
+  - Hardware watchdog timer
+  - Automatic crash recovery
+  - Boot count tracking
+  - Last reset reason logging
 
-1. **Serial1 vs Serial**
-   - Serial = USB debug (115200)
-   - Serial1 = Modbus RTU (9600)
-   - Check at disse ikke blandes sammen
+### Security (hvis relevant)
+- [ ] **Access Control**
+  - CLI password protection
+  - Modbus function code filtering
+  - Register access control lists
 
-2. **F() Macro**
-   - Virker fint i PlatformIO
-   - Bruges til at spare RAM
+- [ ] **Audit Logging**
+  - Configuration change log
+  - Command execution log
+  - Modbus transaction log
 
-3. **EEPROM Library**
-   - Arduino Mega bruger EEPROM.h
-   - Ingen ændringer nødvendige
+---
 
-4. **Timing**
-   - millis() og micros() virker ens
-   - RTU gap timing skal valideres
+## 🐛 Known Issues / Limitations
 
-## 💡 Optimeringer (Senere)
+### Current Limitations
+- Frequency measurement: 0-20 kHz max (by design)
+- Counter max: 64-bit (sufficient for most applications)
+- Timers: 4 max (hardware limitation)
+- Counters: 4 max (hardware limitation)
+- CLI buffer: 256 chars (can be increased if needed)
 
-- [ ] Tilføj unit tests i test/ mappe
-- [ ] Implementer OTA (Over-The-Air) updates?
-- [ ] Tilføj Modbus TCP/IP variant for ESP32?
-- [ ] Opret library af Modbus engine til genbrug
-- [ ] Dokumenter API i Doxygen format
+### Minor Issues
+- None currently reported ✅
 
-## 📝 Noter
+### Future Considerations
+- RAM usage: 56.8% - comfortable, but watch for expansion
+- Flash usage: 20.1% - plenty of room for features
+- EEPROM schema: v9 - consider migration path for v10+
 
-**Hvor finder jeg .cpp filerne?**
-- De er normalt i samme mappe som .ino filen i Arduino IDE
-- Eller de kan være spredt i forskellige tabs i Arduino IDE
-- Eksporter evt. via Arduino IDE: Sketch → Export compiled Binary
+---
 
-**Hvad hvis en .cpp fil mangler?**
-- Check om funktionaliteten er implementeret i .ino filen
-- Nogle gange er alt inkluderet i hovedfilen
-- Ellers skal du muligvis skrive implementeringen selv
+## 📋 Development Roadmap
 
-**Hjælp! Jeg kan ikke finde alle filerne!**
-- Send mig hele din Arduino projektmappe
-- Jeg kan hjælpe med at identificere manglende dele
+### Phase 1: Completed ✅
+- Core Modbus RTU implementation
+- Timer & Counter engines
+- CLI system
+- EEPROM persistence
+- **v3.2.0: Frequency measurement & naming consistency**
+
+### Phase 2: Testing (Optional)
+- Unit test framework
+- Integration tests
+- Automated testing on hardware
+
+### Phase 3: Connectivity (Optional)
+- ESP32 port with WiFi
+- Modbus TCP/IP
+- Web interface
+
+### Phase 4: Advanced Features (Optional)
+- MQTT integration
+- Data logging
+- Enhanced diagnostics
+
+---
+
+## 🔧 Maintenance Tasks
+
+### Regular Reviews
+- [ ] Review RAM usage after major features
+- [ ] Update manual with new features
+- [ ] Version bump and tagging
+- [ ] GitHub release notes
+
+### Code Quality
+- [ ] Code comments review
+- [ ] Function documentation (Doxygen?)
+- [ ] Code style consistency
+- [ ] Dead code removal
+
+### Security Updates
+- [ ] Arduino core updates
+- [ ] PlatformIO updates
+- [ ] Library dependency updates
+
+---
+
+## 💡 Ideas & Experiments
+
+### Experimental Features
+- [ ] Dynamic register allocation
+- [ ] User-defined function codes
+- [ ] Lua/Python scripting engine
+- [ ] Machine learning for anomaly detection
+- [ ] Voice control via Alexa/Google Home integration
+
+### Performance Experiments
+- [ ] DMA for serial communication
+- [ ] Interrupt-driven Modbus parsing
+- [ ] Zero-copy buffer management
+- [ ] Assembly optimization for critical paths
+
+---
+
+## 📝 Notes
+
+### Priority Legend
+- 🔥 **High Priority** - Needed soon
+- 🌟 **Medium Priority** - Nice to have
+- 💭 **Low Priority** - Future consideration
+- 🧪 **Experimental** - Proof of concept
+
+### Current Focus
+✅ **v3.2.0 is complete and stable**
+- Focus: Deployment and real-world testing
+- Next: Gather user feedback for v3.3.0 planning
+
+### Contributing
+- Fork the repo
+- Create feature branch
+- Submit pull request
+- Follow existing code style
+
+---
+
+## 🎯 Next Release Planning
+
+### v3.3.0 (Future)
+Ideas for next release (pending user feedback):
+- TBD based on real-world usage
+- Potential: Enhanced logging
+- Potential: Performance profiling tools
+- Potential: Additional Modbus function codes
+
+### v4.0.0 (Future)
+Major version considerations:
+- ESP32 port
+- Modbus TCP/IP
+- Breaking changes to API (if needed)
+
+---
+
+## ✨ Conclusion
+
+**Current Status:** Production-ready and stable ✅
+
+The project has achieved all core objectives and is ready for deployment.
+Future enhancements are optional and based on specific use cases.
+
+**Focus:** Real-world testing and user feedback collection for v3.3.0 planning.

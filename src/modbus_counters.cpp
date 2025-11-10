@@ -115,22 +115,32 @@ static void store_value_to_regs(uint8_t idx) {
     holdingRegs[base + w] = (uint16_t)((u >> (16 * w)) & 0xFFFF);
   }
 
-  // Skriv rå, u-skaleret tællerværdi til regIndex + 4 ..
-  // Layout:
-  //   8/16 bit : regIndex         (skaleret), regIndex+4         (rå)
-  //   32 bit   : reg..reg+1       (skaleret), reg+4..reg+5       (rå)
-  //   64 bit   : reg..reg+3       (skaleret), reg+4..reg+7       (rå)
-  uint16_t rawBase  = c.regIndex + 4;
-  uint8_t  rawWords = words;
+  // Skriv rå, u-skaleret tællerværdi til rawReg (hvis konfigureret)
+  // Layout baseret på bitWidth:
+  //   8/16 bit : 1 word
+  //   32 bit   : 2 words
+  //   64 bit   : 4 words
+  uint16_t rawBase = 0;
+  bool writeRaw = false;
 
-  if ((uint32_t)rawBase + rawWords > NUM_REGS) {
-    // Ingen plads til rå-vinduet → skaleret værdi skrives stadig, rå droppes
-    return;
+  if (c.rawReg > 0 && c.rawReg < NUM_REGS) {
+    // Brug konfigurerbar rawReg
+    rawBase = c.rawReg;
+    writeRaw = true;
+  } else if (c.regIndex > 0) {
+    // Fallback til gammel metode: regIndex + 4
+    rawBase = c.regIndex + 4;
+    writeRaw = true;
   }
 
-  uint64_t raw = maskToBitWidth((uint64_t)c.counterValue, bw);
-  for (uint8_t w = 0; w < rawWords; ++w) {
-    holdingRegs[rawBase + w] = (uint16_t)((raw >> (16 * w)) & 0xFFFF);
+  if (writeRaw) {
+    uint8_t rawWords = words;
+    if ((uint32_t)rawBase + rawWords <= NUM_REGS) {
+      uint64_t raw = maskToBitWidth((uint64_t)c.counterValue, bw);
+      for (uint8_t w = 0; w < rawWords; ++w) {
+        holdingRegs[rawBase + w] = (uint16_t)((raw >> (16 * w)) & 0xFFFF);
+      }
+    }
   }
 }
 
@@ -151,6 +161,14 @@ static void handle_control(CounterConfig& c) {
     c.counterValue = sv;
     c.edgeCount = 0;
     c.overflowFlag = 0;
+
+    // Reset frequency tracking
+    c.lastFreqCalcMs = 0;
+    c.lastCountForFreq = 0;
+    c.currentFreqHz = 0;
+    if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
+      holdingRegs[c.freqReg] = 0;
+    }
 
     if (c.overflowReg < NUM_REGS) holdingRegs[c.overflowReg] = 0;
 
@@ -201,12 +219,14 @@ void counters_init() {
     c.prescaler = 1;
     c.inputIndex    = 0;
     c.regIndex      = 0;
+    c.rawReg        = 0;        // NEW
+    c.freqReg       = 0;        // NEW
     c.controlReg    = 0;
     c.overflowReg   = 0;
     c.startValue    = 0;
     c.scale         = 1.0f;
     c.counterValue  = 0;
-    
+
     // Auto-start counters der er enablet i config
     c.running       = 0;
     c.overflowFlag  = 0;
@@ -217,6 +237,11 @@ void counters_init() {
     c.debounceEnable = 0;
     c.debounceTimeMs = 0;
     c.lastEdgeMs     = 0;
+
+    // Frekvens-måling defaults
+    c.lastCountForFreq = 0;     // NEW
+    c.lastFreqCalcMs   = 0;     // NEW
+    c.currentFreqHz    = 0;     // NEW
   }
 }
 
@@ -326,6 +351,14 @@ void counters_loop() {
       uint64_t sv = c.startValue;
       sv = maskToBitWidth(sv, bw);
       c.counterValue = sv;
+
+      // Reset frequency tracking ved overflow
+      c.lastFreqCalcMs = 0;
+      c.lastCountForFreq = 0;
+      c.currentFreqHz = 0;
+      if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
+        holdingRegs[c.freqReg] = 0;
+      }
     }
 
     // Spejl overflowFlag og skaleret værdi
@@ -334,6 +367,70 @@ void counters_loop() {
     }
 
     store_value_to_regs(idx);
+
+    // Frekvens-beregning (hvert sekund)
+    if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
+      unsigned long nowMs = millis();
+
+      // Initialiser første gang
+      if (c.lastFreqCalcMs == 0) {
+        c.lastFreqCalcMs = nowMs;
+        c.lastCountForFreq = c.counterValue;
+        c.currentFreqHz = 0;
+        holdingRegs[c.freqReg] = 0;
+      }
+
+      // Beregn frekvens hvert sekund (1000-2000 ms window for stability)
+      unsigned long deltaTimeMs = nowMs - c.lastFreqCalcMs;
+      if (deltaTimeMs >= 1000 && deltaTimeMs <= 2000) {
+        uint64_t deltaCount = 0;
+        bool validDelta = true;
+
+        if (c.counterValue >= c.lastCountForFreq) {
+          deltaCount = c.counterValue - c.lastCountForFreq;
+        } else {
+          // Handle overflow wrap-around
+          uint8_t bw = sanitizeBitWidth(c.bitWidth);
+          uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
+          deltaCount = (maxVal - c.lastCountForFreq) + c.counterValue + 1;
+
+          // Sanity check: hvis deltaCount er urimeligt stor, skip beregning
+          // (sandsynligvis counter reset eller timing fejl)
+          if (deltaCount > maxVal / 2) {
+            validDelta = false;
+          }
+        }
+
+        // Beregn kun hvis deltaCount er reasonable (max 100kHz @ 1sec sample)
+        if (validDelta && deltaCount <= 100000UL) {
+          // Beregn Hz: pulser per sekund
+          // Brug 32-bit for mellemresultat for at undgå overflow
+          uint32_t freqCalc = (uint32_t)((deltaCount * 1000UL) / deltaTimeMs);
+
+          // Clamp til reasonable range (0-20000 Hz)
+          if (freqCalc > 20000UL) freqCalc = 20000UL;
+
+          c.currentFreqHz = (uint16_t)freqCalc;
+        } else {
+          // Invalid delta - behold sidste gyldige værdi
+          // (undgå at skrive garbage data)
+        }
+
+        // Skriv til freqReg (atomic write for Modbus consistency)
+        holdingRegs[c.freqReg] = c.currentFreqHz;
+
+        // Opdater tracking
+        c.lastCountForFreq = c.counterValue;
+        c.lastFreqCalcMs = nowMs;
+      } else if (deltaTimeMs > 5000) {
+        // Hvis mere end 5 sekunder siden sidste update, reset tracking
+        // (undgå accumulation af fejl ved lange pauser)
+        c.lastFreqCalcMs = nowMs;
+        c.lastCountForFreq = c.counterValue;
+        c.currentFreqHz = 0;
+        holdingRegs[c.freqReg] = 0;
+      }
+    }
   }
 }
 
@@ -414,6 +511,14 @@ void counters_reset(uint8_t id) {
   c.edgeCount    = 0;
   c.overflowFlag = 0;
 
+  // Reset frequency tracking
+  c.lastFreqCalcMs = 0;
+  c.lastCountForFreq = 0;
+  c.currentFreqHz = 0;
+  if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
+    holdingRegs[c.freqReg] = 0;
+  }
+
   if (c.overflowReg < NUM_REGS) {
     holdingRegs[c.overflowReg] = 0;
   }
@@ -433,6 +538,14 @@ void counters_clear_all() {
     c.edgeCount    = 0;
     c.overflowFlag = 0;
 
+    // Reset frequency tracking
+    c.lastFreqCalcMs = 0;
+    c.lastCountForFreq = 0;
+    c.currentFreqHz = 0;
+    if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
+      holdingRegs[c.freqReg] = 0;
+    }
+
     if (c.overflowReg < NUM_REGS) {
       holdingRegs[c.overflowReg] = 0;
     }
@@ -446,11 +559,12 @@ void counters_clear_all() {
 
 void counters_print_status() {
   Serial.println(F(""));
-  Serial.println(F("------------------------------------------------------------------------------------------------------------------------------"));
-  Serial.println(F("co = count-on, sv = startValue, res = resolution, ps = prescaler, ol = overload, c = control, dir = direction, sf = scaleFloat"));
-  Serial.println(F("cr = count-reg, d = debounce, dt = debounce-time, input = dis input reg, value = scaled value, raw = unscaled value"));
-  Serial.println(F("------------------------------------------------------------------------------------------------------------------------------"));
-  Serial.println(F("counter | mode| co     | sv       | res | ps   | ol   | c    | dir   | sf     | cr   | d   | dt   | input | value     | raw"));
+  Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------"));
+  Serial.println(F("co = count-on, sv = startValue, res = resolution, ps = prescaler, ir = index-reg, rr = raw-reg, fr = freq-reg"));
+  Serial.println(F("or = overload-reg, cr = ctrl-reg, dir = direction, sf = scaleFloat, dis = input-dis, d = debounce, dt = debounce-ms"));
+  Serial.println(F("hz = measured freq (Hz), value = scaled value, raw = raw counter value"));
+  Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------"));
+  Serial.println(F("counter | mode| co     | sv       | res | ps   | ir   | rr   | fr   | or   | cr   | dir   | sf     | dis | d   | dt   | hz    | value     | raw"));
 
   char buf[32];
 
@@ -473,8 +587,11 @@ void counters_print_status() {
     sprintf(buf, "%-9lu| ", (unsigned long)c.startValue); Serial.print(buf);
     sprintf(buf, "%-4d| ", c.bitWidth); Serial.print(buf);
     sprintf(buf, "%-5d| ", c.prescaler); Serial.print(buf);
-    sprintf(buf, "%-5d| ", c.overflowReg); Serial.print(buf);
-    sprintf(buf, "%-5d| ", c.controlReg); Serial.print(buf);
+    sprintf(buf, "%-5d| ", c.regIndex); Serial.print(buf);       // ir = index-reg
+    sprintf(buf, "%-5d| ", c.rawReg); Serial.print(buf);         // rr = raw-reg
+    sprintf(buf, "%-5d| ", c.freqReg); Serial.print(buf);        // fr = freq-reg
+    sprintf(buf, "%-5d| ", c.overflowReg); Serial.print(buf);    // or = overload-reg
+    sprintf(buf, "%-5d| ", c.controlReg); Serial.print(buf);     // cr = ctrl-reg
     sprintf(buf, "%-6s| ", dirStr); Serial.print(buf);
 
     // Format scale float manually (sprintf %f not supported on all Arduino boards)
@@ -484,10 +601,10 @@ void counters_print_status() {
     sprintf(buf, "%d.%03d  | ", scaleInt, scaleDec);
     Serial.print(buf);
 
-    sprintf(buf, "%-5d| ", c.regIndex); Serial.print(buf);
+    sprintf(buf, "%-4d| ", c.inputIndex); Serial.print(buf);     // dis = input-dis
     sprintf(buf, "%-4s| ", dStr); Serial.print(buf);
     sprintf(buf, "%-5d| ", c.debounceTimeMs); Serial.print(buf);
-    sprintf(buf, "%-6d| ", c.inputIndex); Serial.print(buf);
+    sprintf(buf, "%-6d| ", c.currentFreqHz); Serial.print(buf);  // hz = measured frequency
     sprintf(buf, "%-10lu| ", val); Serial.print(buf);
     sprintf(buf, "%-10lu", raw); Serial.println(buf);
   }

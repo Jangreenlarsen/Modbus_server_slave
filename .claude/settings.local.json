@@ -4,7 +4,10 @@
       "Bash(find:*)",
       "Bash(pio run:*)",
       "Bash(git add:*)",
-      "Bash(git commit -m \"$(cat <<''EOF''\nVersion v3.1.9 - Counter control improvements\n\nMajor changes:\n- Changed CLI syntax: ''set counter <id> reset-on-read ENABLE''\n- Added CLI command: ''set counter <id> start ENABLE'' \n- Control register fully writable via Modbus FC6\n- Only bit 3 (reset-on-read) persists in EEPROM\n- Optimized command history to 3 commands (RAM: 47.3%)\n- Fixed EEPROM schema mismatch (schema 7→8)\n- Fixed scale float display in show counters\n- Added remote echo and backspace support in CLI\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
+      "Bash(git commit -m \"$(cat <<''EOF''\nVersion v3.1.9 - Counter control improvements\n\nMajor changes:\n- Changed CLI syntax: ''set counter <id> reset-on-read ENABLE''\n- Added CLI command: ''set counter <id> start ENABLE'' \n- Control register fully writable via Modbus FC6\n- Only bit 3 (reset-on-read) persists in EEPROM\n- Optimized command history to 3 commands (RAM: 47.3%)\n- Fixed EEPROM schema mismatch (schema 7→8)\n- Fixed scale float display in show counters\n- Added remote echo and backspace support in CLI\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git tag:*)",
+      "Bash(git push)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

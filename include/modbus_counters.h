@@ -87,9 +87,11 @@ struct CounterConfig {
   uint8_t   prescaler;   // 1..256
   uint16_t  inputIndex;  // discrete input index
 
-  uint16_t  regIndex;    // base holding register for værdi
-  uint16_t  controlReg;  // bitmask: start/stop/reset
-  uint16_t  overflowReg; // holding reg for overflow-flag (0/1)
+  uint16_t  regIndex;    // base holding register for skaleret værdi (index-reg)
+  uint16_t  rawReg;      // holding register for rå værdi (raw-reg)
+  uint16_t  freqReg;     // holding register for målt frekvens i Hz (freq-reg)
+  uint16_t  controlReg;  // bitmask: start/stop/reset (ctrl-reg)
+  uint16_t  overflowReg; // holding reg for overflow-flag (overload-reg)
 
   uint32_t  startValue;  // init-værdi ved reset
   float     scale;       // skaleringsfaktor (1.0 = ingen skalering)
@@ -105,6 +107,11 @@ struct CounterConfig {
   uint8_t       debounceEnable;  // 0=off, 1=on
   uint16_t      debounceTimeMs;  // debounce-tid i ms
   unsigned long lastEdgeMs;      // timestamp for sidste accepterede edge
+
+  // Frekvens-måling (v3.2.0)
+  uint64_t      lastCountForFreq;   // sidste count ved frekvens-beregning
+  unsigned long lastFreqCalcMs;     // timestamp for sidste frekvens-beregning
+  uint16_t      currentFreqHz;      // senest målte frekvens i Hz
 
   // Persistent control-flags (fx reset-on-read)
   uint16_t controlFlags;   // bitmask, bit3 = reset-on-read

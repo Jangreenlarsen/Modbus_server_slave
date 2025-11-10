@@ -117,7 +117,7 @@ static const bool CLI_DEBUG_ECHO = false; // set true for RX echo debug
 
 // ---------- Command History (last 3 commands, optimized for RAM) ----------
 #define CMD_HISTORY_SIZE 3
-#define CMD_LINE_MAX 128
+#define CMD_LINE_MAX 256
 static char cmdHistory[CMD_HISTORY_SIZE][CMD_LINE_MAX];
 static uint8_t cmdHistoryCount = 0;    // Total commands stored (0..3)
 static uint8_t cmdHistoryWrite = 0;    // Next write position (circular)
@@ -408,18 +408,20 @@ static void print_counters_config_block(bool onlyEnabled) {
     if (scaleDec < 10) Serial.print('0');
     Serial.print(scaleDec);
 
-    Serial.print(F(" input=")); Serial.print(c.inputIndex);
-    Serial.print(F(" reg=")); Serial.print(c.regIndex);
-    Serial.print(F(" overload="));
+    Serial.print(F(" input-dis=")); Serial.print(c.inputIndex);
+    Serial.print(F(" index-reg=")); Serial.print(c.regIndex);
+    if (c.rawReg > 0 && c.rawReg < NUM_REGS) {
+      Serial.print(F(" raw-reg=")); Serial.print(c.rawReg);
+    }
+    if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
+      Serial.print(F(" freq-reg=")); Serial.print(c.freqReg);
+    }
+    Serial.print(F(" overload-reg="));
     if (c.overflowReg < NUM_REGS) Serial.print(c.overflowReg); else Serial.print(F("n/a"));
-    Serial.print(F(" control="));
+    Serial.print(F(" ctrl-reg="));
     if (c.controlReg < NUM_REGS) Serial.print(c.controlReg); else Serial.print(F("n/a"));
     Serial.print(F(" start="));
     Serial.print((unsigned long)(c.startValue & 0xFFFFFFFFULL));
-
-    // Rå intern tællerværdi (counterValue før skalering)
-    Serial.print(F(" raw="));
-    Serial.print((unsigned long)(c.counterValue & 0xFFFFFFFFULL));
 
     Serial.print(F(" debounce="));
     if (c.debounceEnable && c.debounceTimeMs > 0) {
@@ -456,6 +458,12 @@ static void print_counters_config_block(bool onlyEnabled) {
       Serial.print(F(" counter")); Serial.print(c.id);
       Serial.print(F(" reset-on-read "));
       if (counterResetOnReadEnable[i]) {
+        Serial.print(F("ENABLE"));
+      } else {
+        Serial.print(F("DISABLE"));
+      }
+      Serial.print(F(" auto-start "));
+      if (counterAutoStartEnable[i]) {
         Serial.println(F("ENABLE"));
       } else {
         Serial.println(F("DISABLE"));
@@ -644,16 +652,20 @@ static void cmd_show(uint8_t ntok, char* tok[]) {
     }
     
     if (anyEnabled) {
-      Serial.println(F("=== COUNTER RESET-ON-READ STATUS ==="));
+      Serial.println(F("=== COUNTER CONTROL STATUS ==="));
       for (uint8_t i = 0; i < 4; ++i) {
         const CounterConfig& c = counters[i];
         if (!c.enabled) continue;
-        
+
         Serial.print(F("Counter")); Serial.print(c.id);
         Serial.print(F(" reset-on-read: "));
-        Serial.println(counterResetOnReadEnable[i] ? F("ENABLED") : F("DISABLED"));
+        Serial.print(counterResetOnReadEnable[i] ? F("ENABLED") : F("DISABLED"));
+        Serial.print(F(" | auto-start: "));
+        Serial.print(counterAutoStartEnable[i] ? F("ENABLED") : F("DISABLED"));
+        Serial.print(F(" | running: "));
+        Serial.println(c.running ? F("YES") : F("NO"));
       }
-      Serial.println(F("===================================="));
+      Serial.println(F("=============================="));
     }
     
     return; 
@@ -936,14 +948,17 @@ uint8_t start = 5;
       continue;
     }
 
-    // resolution:<8|16|32|64>
-    if (!strncasecmp(p, "resolution:", 11)) {
-      uint8_t bw = (uint8_t)strtoul(p + 11, nullptr, 10);
-      if (bw == 8 || bw == 16 || bw == 32 || bw == 64)
-        cfg.bitWidth = bw;
-      else {
-        Serial.println(F("% Invalid resolution (use 8|16|32|64)"));
-        return;
+    // resolution:<8|16|32|64> (også accept res: for backward compatibility)
+    if (!strncasecmp(p, "resolution:", 11) || !strncasecmp(p, "res:", 4)) {
+      const char* valStr = strchr(p, ':');
+      if (valStr) {
+        uint8_t bw = (uint8_t)strtoul(valStr + 1, nullptr, 10);
+        if (bw == 8 || bw == 16 || bw == 32 || bw == 64)
+          cfg.bitWidth = bw;
+        else {
+          Serial.println(F("% Invalid resolution (use 8|16|32|64)"));
+          return;
+        }
       }
       continue;
     }
@@ -959,47 +974,81 @@ uint8_t start = 5;
       continue;
     }
 
-    // overload:<reg>
-    if (!strncasecmp(p, "overload:", 9)) {
+    // overload-reg:<reg> (også accept overload: for backward compatibility)
+    if (!strncasecmp(p, "overload-reg:", 13) || !strncasecmp(p, "overload:", 9)) {
+      const char* valStr = strchr(p, ':');
+      if (valStr) {
+        uint16_t r = (uint16_t)strtoul(valStr + 1, nullptr, 10);
+        if (r >= NUM_REGS) {
+          Serial.println(F("% overload-reg out of range"));
+          return;
+        }
+        cfg.overflowReg = r;
+      }
+      continue;
+    }
+
+    // input-dis:<di_index> (også accept input: for backward compatibility)
+    if (!strncasecmp(p, "input-dis:", 10) || !strncasecmp(p, "input:", 6)) {
+      const char* valStr = strchr(p, ':');
+      if (valStr) {
+        uint16_t di = (uint16_t)strtoul(valStr + 1, nullptr, 10);
+        if (di >= NUM_DISCRETE) {
+          Serial.println(F("% input-dis index out of range"));
+          return;
+        }
+        cfg.inputIndex = di;
+      }
+      continue;
+    }
+
+    // index-reg:<reg_index> (også accept count-reg: for backward compatibility)
+    if (!strncasecmp(p, "index-reg:", 10) || !strncasecmp(p, "count-reg:", 10)) {
+      const char* valStr = strchr(p, ':');
+      if (valStr) {
+        uint16_t r = (uint16_t)strtoul(valStr + 1, nullptr, 10);
+        if (r >= NUM_REGS) {
+          Serial.println(F("% index-reg out of range"));
+          return;
+        }
+        cfg.regIndex = r;
+      }
+      continue;
+    }
+
+    // raw-reg:<reg_index> (NEW)
+    if (!strncasecmp(p, "raw-reg:", 8)) {
+      uint16_t r = (uint16_t)strtoul(p + 8, nullptr, 10);
+      if (r >= NUM_REGS) {
+        Serial.println(F("% raw-reg out of range"));
+        return;
+      }
+      cfg.rawReg = r;
+      continue;
+    }
+
+    // freq-reg:<reg_index> (NEW)
+    if (!strncasecmp(p, "freq-reg:", 9)) {
       uint16_t r = (uint16_t)strtoul(p + 9, nullptr, 10);
       if (r >= NUM_REGS) {
-        Serial.println(F("% overload register out of range"));
+        Serial.println(F("% freq-reg out of range"));
         return;
       }
-      cfg.overflowReg = r;
+      cfg.freqReg = r;
       continue;
     }
 
-    // input:<di_index>
-    if (!strncasecmp(p, "input:", 6)) {
-      uint16_t di = (uint16_t)strtoul(p + 6, nullptr, 10);
-      if (di >= NUM_DISCRETE) {
-        Serial.println(F("% input index out of range"));
-        return;
+    // ctrl-reg:<ctrlReg> (også accept control-reg: for backward compatibility)
+    if (!strncasecmp(p, "ctrl-reg:", 9) || !strncasecmp(p, "control-reg:", 12)) {
+      const char* valStr = strchr(p, ':');
+      if (valStr) {
+        uint16_t r = (uint16_t)strtoul(valStr + 1, nullptr, 10);
+        if (r >= NUM_REGS) {
+          Serial.println(F("% ctrl-reg out of range"));
+          return;
+        }
+        cfg.controlReg = r;
       }
-      cfg.inputIndex = di;
-      continue;
-    }
-
-    // count-reg:<reg_index>
-    if (!strncasecmp(p, "count-reg:", 10)) {
-      uint16_t r = (uint16_t)strtoul(p + 10, nullptr, 10);
-      if (r >= NUM_REGS) {
-        Serial.println(F("% count-reg out of range"));
-        return;
-      }
-      cfg.regIndex = r;
-      continue;
-    }
-
-    // control-reg:<ctrlReg>
-    if (!strncasecmp(p, "control-reg:", 12)) {
-      uint16_t r = (uint16_t)strtoul(p + 12, nullptr, 10);
-      if (r >= NUM_REGS) {
-        Serial.println(F("% control-reg out of range"));
-        return;
-      }
-      cfg.controlReg = r;
       continue;
     }
 
@@ -1396,11 +1445,27 @@ if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "COIL") &
 
       if (!strcasecmp(tok[4], "ENABLE")) {
         counterAutoStartEnable[idx] = 1;
-        Serial.print(F(" Counter ")); Serial.print(id);
+        // Start counter immediately if enabled
+        if (counters[idx].enabled) {
+          counters[idx].running = 1;
+          // Set bit 1 in control register
+          if (counters[idx].controlReg < NUM_REGS) {
+            holdingRegs[counters[idx].controlReg] |= 0x0002;
+          }
+        }
+        Serial.print(F("Counter ")); Serial.print(id);
         Serial.println(F(" auto-start ENABLED"));
       } else if (!strcasecmp(tok[4], "DISABLE")) {
         counterAutoStartEnable[idx] = 0;
-        Serial.print(F(" Counter ")); Serial.print(id);
+        // Stop counter immediately if enabled
+        if (counters[idx].enabled) {
+          counters[idx].running = 0;
+          // Set bit 2 in control register
+          if (counters[idx].controlReg < NUM_REGS) {
+            holdingRegs[counters[idx].controlReg] |= 0x0004;
+          }
+        }
+        Serial.print(F("Counter ")); Serial.print(id);
         Serial.println(F(" auto-start DISABLED"));
       } else {
         Serial.println(F("% Use ENABLE or DISABLE"));
@@ -1595,14 +1660,14 @@ static void cmd_help() {
   Serial.println(F(" no set timer <id>           - remove timer from configuration"));
   Serial.println(F(" ---"));
   Serial.println(F(" set counter <id> mode 1 parameter count-on:<rising|falling|both>"));
-  Serial.println(F("   start-value:<n> resolution:<8|16|32|64> prescaler:<1..256>"));
-  Serial.println(F("   overload:<reg> input:<di_index> count-reg:<reg_index> control-reg:<ctrlReg>"));
-  Serial.println(F("   direction:<up|down> scale:<float>"));
+  Serial.println(F("   start-value:<n> res|resolution:<8|16|32|64> prescaler:<1..256>"));
+  Serial.println(F("   index-reg:<reg> raw-reg:<reg> freq-reg:<reg> overload-reg:<reg> ctrl-reg:<reg>"));
+  Serial.println(F("   input-dis:<di_idx> direction:<up|down> scale:<float>"));
   Serial.println(F("   debounce:<on|off> [debounce-ms:<ms>]"));
   Serial.println(F(" set counter <id> reset-on-read ENABLE|DISABLE"));
   Serial.println(F("   - Enable/disable counter reset-on-read (bit 3 in control register)"));
   Serial.println(F(" set counter <id> start ENABLE|DISABLE"));
-  Serial.println(F("   - Enable/disable counter auto-start on boot"));
+  Serial.println(F("   - Enable/disable counter (starts immediately and on boot)"));
   Serial.println(F(" no set counter <id>         - remove counter from configuration"));
   Serial.println(F(" reset counter <id>          - reset selected counter"));
   Serial.println(F(" clear counters              - reset all counters and overflow flags"));
@@ -1621,8 +1686,8 @@ static void cmd_help() {
   Serial.println(F("  no set timer 1"));
   Serial.println();
   Serial.println(F("  set counter 1 mode 1 parameter count-on:rising start-value:0 res:32 prescaler:1"));
-  Serial.println(F("   overload:120 input:12 count-reg:100 control-reg:130 direction:down scale:2.500"));
-  Serial.println(F("   debounce:on debounce-ms:25"));
+  Serial.println(F("   index-reg:100 raw-reg:104 freq-reg:108 overload-reg:120 ctrl-reg:130"));
+  Serial.println(F("   input-dis:12 direction:down scale:2.500 debounce:on debounce-ms:25"));
   Serial.println();
   Serial.println(F("  set reg static 150 value 1234"));
   Serial.println(F("  set coil static 10 ON"));

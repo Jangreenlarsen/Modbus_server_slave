@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8" />
+<title>Modbus RTU Server / CLI – System-, Timer- & Counter-manual (v3.2.0)</title>
+<style>
+body {font-family: system-ui, sans-serif; line-height:1.6; max-width:1000px; margin:auto; padding:2rem; background:#f7f7f9; color:#222;}
+h1,h2,h3,h4{color:#222;}
+code{background:#e8e8e8;padding:0.1rem 0.3rem;border-radius:3px;}
+pre{background:#dde1e7;color:#111;padding:1rem;border-radius:4px;overflow-x:auto;}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:0.9rem;}
+th,td{border:1px solid #ccc;padding:0.4rem 0.6rem;text-align:left;vertical-align:top;}
+th{background:#e9e9ef;}
+.note{padding:0.6rem 0.8rem;background:#eef7ff;border-left:3px solid #005bbb;margin:1rem 0;}
+.example-label{font-weight:bold;margin-top:0.5rem;}
+.quickref{background:#ddeeff;padding:1rem;border-left:4px solid #004a99;margin:1rem 0;border-radius:4px;}
+hr{margin:2rem 0;}
+</style>
+</head>
+<body>
+
+<h1>Modbus RTU Server / CLI – System-, Timer- & Counter-manual v3.2.0</h1>
+
+<p>Denne manual beskriver hele Modbus RTU Server / CLI-systemet på Arduino Mega2560-platformen:</p>
+<ul>
+  <li>Systemfunktion og overblik</li>
+  <li>Modbus RTU, UART og RS-485 hardware-grænseflader</li>
+  <li>CLI-struktur, global systemkonfiguration og systemkommandoer</li>
+  <li>GPIO-konfiguration (STATIC/DYNAMIC)</li>
+  <li>TimerEngine v2 (4 modes inkl. input-triggered mode 4 med subModes)</li>
+  <li>CounterEngine v3 (skalerede/rå værdier, debounce, reset-on-read osv.)</li>
+  <li>Versionshistorik</li>
+  <li>Komplet CLI-kommandooversigt</li>
+</ul>
+
+<div class="quickref">
+<b>Indholdsstruktur</b>
+<ol>
+  <li>System funktion og overblik</li>
+  <li>Modbus og hardware-grænseflader</li>
+  <li>System CLI</li>
+  <li>GPIO-konfiguration og operation</li>
+  <li>Timers</li>
+  <li>Counters</li>
+  <li>Versionshistorik (uddrag)</li>
+  <li>CLI-kommandooversigt</li>
+</ol>
+</div>
+
+<!-- 1. SYSTEM FUNKTION OG OVERBLIK -->
+
+<h2>1. System funktion og overblik</h2>
+
+<h3>1.1 System funktion</h3>
+<p>Systemet er en kompakt <strong>Modbus RTU slave / IO-gateway</strong> baseret på Arduino Mega2560 med RS-485 interface. Hovedfunktionerne er:</p>
+<ul>
+  <li>Modtage og besvare Modbus RTU-forespørgsler (FC01/02/03/04/05/06/0F/10).</li>
+  <li>Styre digitale outputs (<strong>coils</strong>) direkte og via timere.</li>
+  <li>Læse digitale inputs (<strong>discrete inputs</strong>), typisk fysiske GPIO-pins.</li>
+  <li>Tælle pulser på inputs via <strong>CounterEngine</strong> (4 tællere).</li>
+  <li>Generere tidsstyrede forløb via <strong>TimerEngine</strong> (4 timere).</li>
+  <li>Gem/indlæs konfiguration i EEPROM (<code>save</code> / <code>load</code> / <code>defaults</code>).</li>
+  <li>Konfigurere og debugge via en CLI (over USB Serial0).</li>
+</ul>
+
+<h3>1.2 System overblik</h3>
+<ul>
+  <li><strong>Platform:</strong> Arduino Mega2560 (ATmega2560 @ 16 MHz).</li>
+  <li><strong>RS-485 Modbus:</strong> via <code>Serial1</code> + DIR-pin (D8).</li>
+  <li><strong>GPIO:</strong> op til 54 digitale pins til inputs/outputs via mapping.</li>
+  <li><strong>Timere:</strong> 4 stk. (mode 1–4, inkl. input-triggered).</li>
+  <li><strong>Counters:</strong> 4 stk. (edge-detektering, prescaler, scale, debounce).</li>
+  <li><strong>Persistens:</strong> EEPROM-baseret konfiguration, inkl. mulighed for SAVE via Modbus.</li>
+</ul>
+
+<div class="note">
+<b>Kort sagt:</b> En fleksibel IO-gateway hvor timer- og tællelogik kan bygges direkte ind i gatewayen,
+så PLC/SCADA kan nøjes med at læse nogle få registre i stedet for at implementere alt i PLC-programmet.
+</div>
+
+<!-- 2. MODBUS OG HARDWARE-GRÆNSEFLADER -->
+
+<h2>2. Modbus og hardware-grænseflader</h2>
+
+<h3>2.1 Modbus RTU kommunikation</h3>
+<p>Firmware implementerer <strong>Modbus RTU (RS-485)</strong> på hardware-serielporten <code>Serial1</code> og bruger en dedikeret retningspin til halv-duplex kommunikation.</p>
+<ul>
+  <li><strong>UART-port:</strong> <code>Serial1</code> (TX1 = pin 18, RX1 = pin 19)</li>
+  <li><strong>RS-485 retningspin (DIR):</strong> digital pin 8</li>
+  <li><strong>Standard baudrate:</strong> typisk 9600 bps (kan ændres via CLI)</li>
+  <li><strong>Slave ID (unit-id):</strong> 1..247 (0 = broadcast/debug mode)</li>
+  <li><strong>Frame-format:</strong> 8 data bits, ingen paritet, 1 stopbit (8N1)</li>
+  <li><strong>Understøttede funktioner:</strong>
+    <ul>
+      <li>0x01 – Read Coils</li>
+      <li>0x02 – Read Discrete Inputs</li>
+      <li>0x03 – Read Holding Registers</li>
+      <li>0x04 – Read Input Registers</li>
+      <li>0x05 – Write Single Coil</li>
+      <li>0x06 – Write Single Register</li>
+      <li>0x0F – Write Multiple Coils</li>
+      <li>0x10 – Write Multiple Registers</li>
+    </ul>
+  </li>
+  <li><strong>CRC:</strong> 16-bit Modbus CRC</li>
+  <li><strong>Timing:</strong> automatisk RTU-gap beregning (inter-frame gap) baseret på baudrate.</li>
+</ul>
+
+<h3>2.2 UART serial og RS-485 beskrivelse</h3>
+<p>RS-485 transceiver-modulet (f.eks. MAX485) forbindes typisk således:</p>
+<table>
+<thead><tr><th>Arduino Mega2560 Pin</th><th>RS-485 Modul Pin</th><th>Funktion</th></tr></thead>
+<tbody>
+<tr><td>Pin 18 (TX1)</td><td>DI</td><td>Data transmit (fra MCU til bus)</td></tr>
+<tr><td>Pin 19 (RX1)</td><td>RO</td><td>Data receive (fra bus til MCU)</td></tr>
+<tr><td>Pin 8</td><td>DE + RE</td><td>Driver enable / Receiver enable (styres af firmware)</td></tr>
+<tr><td>VCC</td><td>VCC</td><td>5V forsyning</td></tr>
+<tr><td>GND</td><td>GND</td><td>Fælles jord</td></tr>
+</tbody>
+</table>
+
+<p>Firmware styrer DIR-pinnen dynamisk:</p>
+<ul>
+  <li>Ved TX: DE=1, RE=1 (driver aktiv)</li>
+  <li>Ved RX: DE=0, RE=0 (driver tri-state, modtager aktiv)</li>
+</ul>
+
+<h3>2.3 GPIO-pins til digitale inputs/outputs</h3>
+<p>Arduino Mega2560 har 54 digitale pins (0–53), der kan anvendes som coil-outputs eller discrete inputs.</p>
+<ul>
+  <li>Pins 0–1: bruges til USB/Serial monitor (CLI). Undgå at mappe disse til IO.</li>
+  <li>Pins 18–19: bruges til Modbus (Serial1). Bør ikke anvendes som almindelig IO.</li>
+  <li>Andre pins kan frit mappes til coils eller inputs via CLI.</li>
+  <li>Indgange aflæses via <code>show inputs</code>, udgange via <code>show coils</code>.</li>
+</ul>
+
+<h3>2.4 Modbus-registertyper i systemet</h3>
+<table>
+<thead><tr><th>Type</th><th>Område (typisk)</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr><td>Coils</td><td>0–63</td><td>Digitale outputs (kan styres manuelt eller via timers).</td></tr>
+<tr><td>Discrete Inputs</td><td>0–255</td><td>Digitale inputs (kobles til counters, triggere osv.).</td></tr>
+<tr><td>Holding Registers</td><td>0–159</td><td>Læs/skrivbare registre (control, scale, status m.m.).</td></tr>
+<tr><td>Input Registers</td><td>0–127</td><td>Read-only registre (diagnostic osv.).</td></tr>
+</tbody>
+</table>
+
+<h3>2.5 Hardwareopsummering</h3>
+<ul>
+  <li><strong>MCU:</strong> ATmega2560 @ 16 MHz</li>
+  <li><strong>Serielport til Modbus:</strong> <code>Serial1</code></li>
+  <li><strong>RS-485 DIR-pin:</strong> D8</li>
+  <li><strong>Digitale pins:</strong> 54 (0–53)</li>
+  <li><strong>Forsyning:</strong> 5V DC</li>
+</ul>
+
+<h3>2.6 Specielle Modbus-kommandoer (SAVE)</h3>
+<p>Firmware v3.1.7 understøtter SAVE direkte via Modbus:</p>
+<table>
+<thead><tr><th>Adresse</th><th>Værdi</th><th>Funktion</th></tr></thead>
+<tbody>
+<tr>
+  <td>HoldingReg 0</td>
+  <td>0x00FF (255)</td>
+  <td>Gemmer den nuværende konfiguration (timers, counters, mappings m.m.) til EEPROM. Funktionelt identisk med CLI-kommandoen <code>save</code>.</td>
+</tr>
+</tbody>
+</table>
+
+<pre><code>; Eksempel – via Modbus FC06 (Write Single Register)
+write reg 0 255      ; Udfører SAVE til EEPROM
+</code></pre>
+
+<p>Efter reboot vil den gemte konfiguration blive indlæst automatisk via <code>initModbus()</code> → <code>configLoad()</code> → <code>configApply()</code>.</p>
+
+<!-- 3. SYSTEM CLI -->
+
+<h2>3. System CLI</h2>
+
+<h3>3.1 System CLI beskrivelse</h3>
+<p>CLI’en er en simpel tekstbaseret shell på USB/Serial0, typisk 115200 8N1. Prompten viser hostnavn:</p>
+<pre><code>rgh-modbus# 
+</code></pre>
+
+<p>Kendetegn:</p>
+<ul>
+  <li>Case-insensitive kommandoer (<code>SHOW</code>, <code>show</code>, <code>ShOw</code> → samme).</li>
+  <li>Understøtter aliaser (<code>sh</code> → <code>show</code>, <code>wr</code> → <code>write</code> osv.).</li>
+  <li>Argumenter og parametre adskilles af mellemrum.</li>
+  <li>Fejl meldes med <code>% Unknown command</code> eller <code>% Unknown parameter</code>.</li>
+</ul>
+
+<h3>3.2 System global config (unit-id, baud, hostname m.m.)</h3>
+<p>Global systemkonfiguration håndteres via <code>set</code>-kommandoer i CLI og gemmes i EEPROM med <code>save</code>.</p>
+Typiske globale parametre (afhængig af firmwarebuild): 
+<ul>
+  <li><strong>Modbus unit-id:</strong> (slave-id) – styres typisk med en kommando a la:
+    <pre><code>set unit-id 10</code></pre>
+  </li>
+  <li><strong>Baudrate:</strong>
+    <pre><code>set baud 9600
+set baud 19200
+set baud 115200</code></pre>
+  </li>
+  <li><strong>Evt. paritet / stopbits:</strong> afhænger af build (fx <code>set parity none/even/odd</code>).</li>
+  <li><strong>Hostname (CLI-prompt):</strong>
+    <pre><code>set hostname rgh-modbus
+save
+
+; Prompt:
+rgh-modbus#</code></pre>
+  </li>
+</ul>
+
+<div class="note">
+<b>Bemærk:</b> De præcise globale parametre (paritet, stopbits osv.) afhænger af projektets endelige CLI-implementering i <code>cli_shell.cpp</code>.
+Unit-id, baudrate og hostname er de centrale, som typisk eksponeres.
+</div>
+
+<h3>3.3 System kommandoer (load, save, reboot m.m.)</h3>
+
+<table>
+<thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>save</code></td>
+  <td>Gemmer aktuel konfiguration (timers, counters, GPIO-mapping, global config) til EEPROM.</td>
+</tr>
+<tr>
+  <td><code>load</code></td>
+  <td>Indlæser konfiguration fra EEPROM og anvender den.</td>
+</tr>
+<tr>
+  <td><code>defaults</code></td>
+  <td>Sætter systemet tilbage til fabriksdefaults (standardmapping, ingen aktive timers/counters osv.).</td>
+</tr>
+<tr>
+  <td><code>reboot</code></td>
+  <td>Rebooter systemet via watchdog-reset.</td>
+</tr>
+<tr>
+  <td><code>show version</code></td>
+  <td>Viser firmwareversion, f.eks. <code>v3.1.7-REV6c</code>.</td>
+</tr>
+<tr>
+  <td><code>help</code> eller <code>?</code></td>
+  <td>Viser en liste over tilgængelige CLI-kommandoer og kort hjælp.</td>
+</tr>
+</tbody>
+</table>
+
+<pre><code>save
+Configuration stored to EEPROM
+
+load
+Configuration loaded from EEPROM
+
+reboot
+System restarting...
+</code></pre>
+
+<!-- 4. GPIO KONFIGURATION OG OPERATION -->
+
+<h2>4. GPIO-konfiguration og operation</h2>
+
+<h3>4.1 Grundlæggende mapping</h3>
+<p>GPIO-pins mappes til coils eller inputs via CLI:</p>
+
+<pre><code>gpio map 22 input 12
+gpio map 23 coil 5
+
+show gpio
+</code></pre>
+
+<p>Dette binder fysisk pin 22 til discrete input 12 og pin 23 til coil 5.</p>
+
+<h3>4.2 STATIC vs. DYNAMIC funktion</h3>
+
+<table>
+<thead><tr><th>Type</th><th>Beskrivelse</th><th>Persistens</th><th>Eksempel</th></tr></thead>
+<tbody>
+<tr>
+  <td><strong>STATIC</strong></td>
+  <td>Mapping der er en del af konfigurationen (gemt i EEPROM). Gendannes automatisk ved reboot via <code>configApply()</code>.</td>
+  <td>Bevares over reboot.</td>
+  <td><pre><code>gpio map 22 coil 10
+save
+reboot   ; pin 22 er stadig coil 10</code></pre></td>
+</tr>
+<tr>
+  <td><strong>DYNAMIC</strong></td>
+  <td>Tilstande (ON/OFF) og eventuelle runtime-ændringer fra timers/counters/Modbus. Påvirker kun RAM og runtime.</td>
+  <td>Forsvinder ved reboot (medmindre gemt som static config).</td>
+  <td><pre><code>; Timer styrer coil 10 dynamisk
+set timer 2 mode 3 parameter coil:10 T1 500 T2 500
+; Coil 10 toggler, men mappingen til GPIO er uændret</code></pre></td>
+</tr>
+</tbody>
+</table>
+
+<h3>4.3 show gpio – eksempel</h3>
+<pre><code>gpio
+----------------------------------------------------------------
+pin | type   | index | mode
+----------------------------------------------------------------
+22  | input  | 12    | STATIC
+23  | coil   | 5     | STATIC
+24  | -      | -     | -
+----------------------------------------------------------------
+</code></pre>
+
+<ul>
+  <li><strong>pin</strong> – fysisk GPIO-nummer.</li>
+  <li><strong>type</strong> – <code>coil</code>, <code>input</code> eller <code>-</code>.</li>
+  <li><strong>index</strong> – coil- eller input-index (som i Modbus).</li>
+  <li><strong>mode</strong> – bruges til at markere mapping som STATIC.</li>
+</ul>
+
+<h3>4.4 Oprydning i GPIO-mapping</h3>
+<ul>
+  <li><code>gpio unmap &lt;pin&gt;</code> – fjerner mapping på en pin.</li>
+  <li><code>no set coil static &lt;idx&gt;</code> – fjerner statisk coil-starttilstand.</li>
+  <li><code>no set reg static &lt;addr&gt;</code> – fjerner statisk register.</li>
+</ul>
+
+<!-- 5. TIMERS -->
+
+<h2>5. Timers – koncept, konfiguration og drift</h2>
+
+<h3>5.1 Timers – koncept og funktion</h3>
+<p><strong>TimerEngine v2</strong> styrer coils ud fra tidsintervaller og mode-typer. Systemet har 4 timere (ID 1–4), hver med sin egen mode og parametre.</p>
+
+<h3>5.2 Timer modes og konfiguration</h3>
+
+<h4>5.2.1 Timer-mode oversigt</h4>
+<table>
+<thead><tr><th>Mode</th><th>Navn</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr>
+  <td>1</td>
+  <td>One-shot</td>
+  <td>
+    Kører én sammenhængende sekvens:
+    <ul>
+      <li>P1 (coil ON) i T1</li>
+      <li>P2 (coil ON/OFF) i T2</li>
+      <li>P3 (coil ON/OFF) i T3</li>
+    </ul>
+    Efter sekvensen stopper timeren, og coil efterlades i sluttilstand.
+  </td>
+</tr>
+<tr>
+  <td>2</td>
+  <td>Monostable (Retrigger)</td>
+  <td>
+    Monostabil funktion: et trigger-signal starter en puls af længde T. Ny trigger mens T kører forlænger tiden.
+  </td>
+</tr>
+<tr>
+  <td>3</td>
+  <td>Astable (Toggle)</td>
+  <td>
+    Astabil “blink”-funktion: ON i T1, OFF i T2, gentaget kontinuerligt.
+  </td>
+</tr>
+<tr>
+  <td>4</td>
+  <td>Input-triggered</td>
+  <td>
+    Trigges af et digitalt input (edge). Hver gang der ses en valgt edge, starter en sekvens på coil'en (T1/T2, P1/P2).
+  </td>
+</tr>
+</tbody>
+</table>
+
+<h4>5.2.2 Fælles timer-parametre</h4>
+<ul>
+  <li><code>T1</code>, <code>T2</code>, <code>T3</code> – tidsperioder i millisekunder.</li>
+  <li><code>coil</code> – coil-index der styres.</li>
+  <li><code>trigger</code> / <code>input</code> – input-index ved input-triggered mode.</li>
+  <li><code>edge</code> – <code>rising</code> / <code>falling</code> / <code>both</code> for mode 4.</li>
+  <li><code>P1</code>, <code>P2</code>, <code>P3</code> – coil-niveauer per fase (<code>high</code>/<code>low</code>).</li>
+  <li><code>sub</code> – sub-mode (variant inden for mode 4, se 5.2.4).</li>
+</ul>
+
+<h4>5.2.3 Eksempler – Mode 1 og 3</h4>
+
+<b>Mode 1 – One-shot</b>
+<pre><code>set timer 1 mode 1 parameter \
+  coil:10 P1:high P2:low P3:low T1 1000 T2 500 T3 0
+
+show timers
+</code></pre>
+
+<b>Mode 3 – Astable blink</b>
+<pre><code>set timer 2 mode 3 parameter \
+  coil:11 P1:high P2:low T1 500 T2 500
+
+show timers
+</code></pre>
+
+<h4>5.2.4 Mode 4 – Input-triggered (sub=0 vs sub=1, retrigger-logik)</h4>
+
+<p>Mode 4 er en <strong>input-triggeret</strong> timer. Hver gang det konfigurerede input ser en valgt kant (edge), forsøger timeren at starte en sekvens.</p>
+
+<p>Parameteren <code>sub</code> styrer, hvor lang sekvensen er, og <strong>hvornår en ny trigger kan accepteres</strong> (retrigger-betingelse):</p>
+
+<table>
+<thead>
+<tr><th>Mode</th><th>sub</th><th>Variant</th><th>Retrigger-beskrivelse</th></tr>
+</thead>
+<tbody>
+<tr>
+  <td>4</td>
+  <td>0</td>
+  <td><strong>Single-phase pulse</strong></td>
+  <td>Timeren udfører kun T1 pr. trigger. En ny trigger kan accepteres så snart T1 er afsluttet.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td>1</td>
+  <td><strong>Two-phase sequence (T1+T2)</strong></td>
+  <td>Timeren udfører både T1 og T2. Den kan først retrigges, når hele sekvensen (T1+T2) er afsluttet. Nye triggers under forløbet ignoreres.</td>
+</tr>
+</tbody>
+</table>
+
+<h5>sub = 0 — Single-phase Pulse (retrigger efter T1)</h5>
+<pre><code>Input :  ──────┐‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾┐───────
+               ↑ Trigger edge
+Coil  :  ______|‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾|_______
+                <--------- T1 --------->
+</code></pre>
+
+<pre><code>set timer 4 mode 4 parameter \
+  P1:high P2:low T1 200 coil 15 trigger 12 edge rising sub 0
+</code></pre>
+
+<ul>
+  <li>Hver rising edge på input 12 sætter coil 15 HIGH i T1 ms (200 ms).</li>
+  <li>Efter T1 går coil tilbage til P2 (her: low).</li>
+  <li>Timeren kan modtage en ny trigger, så snart T1 er afsluttet.</li>
+</ul>
+
+<h5>sub = 1 — Two-phase Sequence (retrigger efter T1 + T2)</h5>
+<pre><code>Input :  ──────┐‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾┐───────
+               ↑ Trigger edge
+Coil  :  ______|‾‾‾‾‾‾‾‾‾‾‾‾‾‾|______________________
+                <--- T1 ---><----- T2 ----->
+</code></pre>
+
+<pre><code>set timer 4 mode 4 parameter \
+  P1:high P2:low T1 200 T2 300 coil 15 trigger 12 edge rising sub 1
+</code></pre>
+
+<ul>
+  <li>På rising edge på input 12: coil går i P1-niveau i T1 ms (200 ms), efterfulgt af P2-niveau i T2 ms (300 ms).</li>
+  <li>Først når både T1 og T2 er gennemført, kan timeren trigges igen.</li>
+  <li>Trigger-pulser der kommer under T1/T2 ignoreres.</li>
+</ul>
+
+<div class="note">
+<b>Praktisk brug:</b><br>
+Brug <code>sub=0</code> til en hurtig “kort puls pr. input” hvor du vil kunne retrigge allerede efter T1.<br>
+Brug <code>sub=1</code> når du vil sikre en fuld to-fase sekvens (T1+T2) pr. trigger, uden at ekstra pulser må “forkorte” eller afbryde sekvensen.
+</div>
+
+<h3>5.3 Timer-status og globale status/kontrolregistre</h3>
+
+<h4>5.3.1 show timers – statusfelter</h4>
+<p><code>show timers</code> viser runtime-status for alle timere:</p>
+
+<table>
+<thead><tr><th>Kolonne</th><th>Navn i kode</th><th>Forklaring</th></tr></thead>
+<tbody>
+<tr><td><strong>timer</strong></td><td><code>id</code></td><td>Timer-ID (1–4).</td></tr>
+<tr><td><strong>mode</strong></td><td><code>mode</code></td><td>1=One-shot, 2=Monostable, 3=Astable, 4=Input-triggered.</td></tr>
+<tr><td><strong>sub</strong></td><td><code>subMode</code></td><td>Under-mode; for mode 4 typisk 0 (single-phase) eller 1 (two-phase).</td></tr>
+<tr><td><strong>P1/P2/P3</strong></td><td><code>p1High</code> osv.</td><td>Coil-niveauer i de enkelte faser.</td></tr>
+<tr><td><strong>T1/T2/T3</strong></td><td><code>T1</code>,<code>T2</code>,<code>T3</code></td><td>Faselængder i millisekunder.</td></tr>
+<tr><td><strong>coil</strong></td><td><code>coil</code></td><td>Coil der styres.</td></tr>
+<tr><td><strong>trig</strong></td><td><code>trigIndex</code></td><td>Input-index for trigger (mode 4).</td></tr>
+<tr><td><strong>edge</strong></td><td><code>trigEdge</code></td><td>Trigger-kant (rise/fall/both).</td></tr>
+<tr><td><strong>act</strong></td><td><code>active</code></td><td><code>run</code> / <code>idle</code>.</td></tr>
+<tr><td><strong>ph</strong></td><td><code>phase</code></td><td>Aktuel fase i sekvensen.</td></tr>
+<tr><td><strong>alarm</strong></td><td><code>alarm</code></td><td>Alarmflag.</td></tr>
+<tr><td><strong>code</strong></td><td><code>alarmCode</code></td><td>Fejlkode (0=OK).</td></tr>
+<tr><td><strong>en</strong></td><td><code>enabled</code></td><td>on/off (om timeren er aktiv i config).</td></tr>
+</tbody>
+</table>
+
+<h4>5.3.1.1 Eksempel på "show timers" output</h4>
+
+<pre><code>show timers
+------------------------------------------------------------------------------------------------------------------------------
+timer | mode | sub | P1 | P2 | P3 | T1(ms) | T2(ms) | T3(ms) | coil | trig | edge  | act  | ph | alarm | code | en
+------------------------------------------------------------------------------------------------------------------------------
+ 1    | 1    | 0   | hi | lo | lo | 1000   | 500    | 0      | 10   | 0    | rise  | idle | 0  | 0     | 0    | on
+ 2    | 3    | 0   | hi | lo | lo | 500    | 500    | 0      | 11   | 0    | rise  | run  | 1  | 0     | 0    | on
+ 3    | 0    | 0   | lo | lo | lo | 0      | 0      | 0      | 0    | 0    | rise  | idle | 0  | 0     | 0    | off
+ 4    | 4    | 1   | hi | lo | lo | 200    | 300    | 0      | 15   | 12   | rise  | idle | 0  | 0     | 0    | on
+------------------------------------------------------------------------------------------------------------------------------
+P1/2/3  = coil-niveau i fase 1/2/3 (hi/lo)
+T1/2/3  = faselængde i millisekunder
+trig    = trigger-input index (mode 4)
+edge    = trigger-kant (rise/fall/both)
+act     = aktiv tilstand (run/idle)
+ph      = aktuel fase
+alarm   = alarm-flag (0 = ingen)
+code    = alarmkode
+en      = enabled-flag (on/off)
+------------------------------------------------------------------------------------------------------------------------------</code></pre>
+
+<h4>5.3.2 Globale timer-status- og kontrolregistre</h4>
+<p>TimerEngine kan skrive en samlet statusbitmaske for alle timere til et globalt holding-register og anvende et globalt kontrolregister (reserveret til senere udvidelser):</p>
+
+<pre><code>set timers status-reg:150 control-reg:151
+</code></pre>
+
+<ul>
+  <li><code>status-reg:&lt;n&gt;</code> – globalt holding-register for timer-aktivitetsbits.</li>
+  <li><code>control-reg:&lt;n&gt;</code> – reserveret til fremtidig global timerkontrol.</li>
+</ul>
+
+<b>Statusbitmapping (status-reg)</b>
+<ul>
+  <li>bit0 = timer 1 aktiv</li>
+  <li>bit1 = timer 2 aktiv</li>
+  <li>bit2 = timer 3 aktiv</li>
+  <li>bit3 = timer 4 aktiv</li>
+</ul>
+
+<div class="note">
+<b>Typisk brug:</b>
+<pre><code>set timers status-reg:150 control-reg:151
+save
+
+; PLC:
+read holding regs 150..151  ; bit0..3 viser aktive timere
+</code></pre>
+</div>
+
+<h3>5.4 Hurtig reference – Timers CLI</h3>
+<ul>
+  <li><code>set timer &lt;id&gt; mode &lt;m&gt; parameter ...</code></li>
+  <li><code>no set timer &lt;id&gt;</code> – sletter/deaktiverer timer.</li>
+  <li><code>set timers status-reg:&lt;n&gt; control-reg:&lt;n&gt;</code>.</li>
+  <li><code>show timers</code> – vis status.</li>
+</ul>
+
+<h3>5.5 Fejlfinding (Timers)</h3>
+<ul>
+  <li>Tjek med <code>show timers</code> at <code>en=on</code> og <code>mode</code> er korrekt.</li>
+  <li>Verificér at <code>coil</code> er mappet korrekt til en GPIO via <code>show gpio</code>.</li>
+  <li>For mode 4: tjek at <code>trig</code> peger på rigtigt input, og at <code>edge</code> matcher signalet.</li>
+  <li>Hvis en timer ikke retrigges som forventet, kontrollér om du bruger <code>sub=0</code> (retrigger efter T1) eller <code>sub=1</code> (retrigger efter T1+T2).</li>
+</ul>
+
+<h3>5.6 Timer eksempler – config og operation</h3>
+<ul>
+  <li>ON/OFF-sekvens på coil ved power-up med mode 1.</li>
+  <li>Monostabil forsinkelse på en coil efter signal via mode 2.</li>
+  <li>Blink-lys på digital udgang med mode 3.</li>
+  <li>Input-triggeret puls eller sekvens på coil med mode 4 (sub=0/1).</li>
+</ul>
+
+<!-- 6. COUNTERS -->
+
+<h2>6. Counters – koncept, konfiguration og drift</h2>
+
+<h3>6.1 Counters – koncept og funktion</h3>
+<p>Systemet har 4 uafhængige tællere (<code>CounterEngine v3</code>), som tæller pulser på digitale inputs.</p>
+<ul>
+  <li>Edge-detektering (rising/falling/both).</li>
+  <li>Prescaler (antal pulser pr. tællerskridt).</li>
+  <li>Op/ned-tælling.</li>
+  <li>BitWidth (8/16/32/64 bit).</li>
+  <li>Scale (floating point) for Modbus-visning.</li>
+  <li>Overflowflag og overflow-register.</li>
+  <li>ControlReg (reset/start/stop + reset-on-read).</li>
+  <li>Debounce (ms) pr. kanal.</li>
+  <li>Auto-start ved reboot, hvis enabled i config.</li>
+  <li><strong>Frekvens-måling</strong>: automatisk måling af input-frekvens i Hz.</li>
+</ul>
+
+<p>Hver counter har tre lag:</p>
+<ul>
+  <li><strong>counterValue</strong>: intern rå 64-bit integer (u-skaleret).</li>
+  <li><strong>skaleret værdi</strong>: <code>counterValue × scale</code>, eksponeret via holding-registre.</li>
+  <li><strong>frekvens</strong>: målt input-frekvens i Hz, opdateret hvert sekund.</li>
+</ul>
+
+<h3>6.2 Counter config – alle parametre</h3>
+
+<h4>6.2.1 Tælle-flow</h4>
+<ol>
+  <li>Inputniveau læses fra <code>inputIndex</code>.</li>
+  <li>Edge-detektering afgør, om en tælle-event opstår.</li>
+  <li>Debounce filtrerer for hurtige gentagelser (hvis aktiveret).</li>
+  <li>Prescaler tæller edges og udfører først et step på <code>counterValue</code>, når edgeCount når prescaler.</li>
+  <li>Afhængigt af retning (up/down) inkrementeres/dekrementeres <code>counterValue</code>.</li>
+  <li>Overflow håndteres; flag sættes og counterValue sættes til startValue.</li>
+  <li>Skaleret værdi og rå værdi skrives til holding-registre (se 6.3, 6.4).</li>
+</ol>
+
+<h4>6.2.2 Skalering</h4>
+<p><code>scale</code> virker som en lineær multiplikator:</p>
+<table>
+<thead><tr><th>Pulser</th><th>counterValue</th><th>scale</th><th>Visning</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>1</td><td>1.0</td><td>1</td></tr>
+<tr><td>1</td><td>1</td><td>2.0</td><td>2</td></tr>
+<tr><td>10</td><td>10</td><td>0.1</td><td>1</td></tr>
+</tbody>
+</table>
+
+<p>Typisk brugt til fast-point:</p>
+<pre><code>scale = 10.0   ; vis 1,2 som 12 (x10)
+scale = 100.0  ; vis 1,23 som 123 (x100)
+</code></pre>
+
+<h4>6.2.3 Parameteroversigt</h4>
+<table>
+<thead><tr><th>Parameter</th><th>Alias (gammel)</th><th>Forklaring</th></tr></thead>
+<tbody>
+<tr><td><code>count-on</code></td><td>-</td><td>Edge: <code>rising</code>/<code>falling</code>/<code>both</code>.</td></tr>
+<tr><td><code>start-value</code></td><td>-</td><td>Init-værdi ved reset/overflow.</td></tr>
+<tr><td><code>res</code></td><td><code>resolution</code></td><td>Bitbredde: 8/16/32/64.</td></tr>
+<tr><td><code>prescaler</code></td><td>-</td><td>Edges pr. tællerskridt (1..256).</td></tr>
+<tr><td><code>index-reg</code></td><td><code>reg</code>, <code>count-reg</code></td><td>Base holding-reg indeks for skaleret værdi.</td></tr>
+<tr><td><code>raw-reg</code></td><td>-</td><td>Holding-reg indeks for rå (u-skaleret) værdi <strong>(ny i v3.2.0)</strong>.</td></tr>
+<tr><td><code>freq-reg</code></td><td>-</td><td>Holding-reg indeks for målt frekvens i Hz <strong>(ny i v3.2.0)</strong>.</td></tr>
+<tr><td><code>overload-reg</code></td><td><code>overload</code></td><td>Holding-reg indeks for overflow-flag.</td></tr>
+<tr><td><code>ctrl-reg</code></td><td><code>control</code>, <code>control-reg</code></td><td>Control-register (bit0–3).</td></tr>
+<tr><td><code>input-dis</code></td><td><code>input</code></td><td>Discrete input index (0..NUM_DISCRETE-1).</td></tr>
+<tr><td><code>direction</code></td><td>-</td><td><code>up</code> eller <code>down</code>.</td></tr>
+<tr><td><code>scale</code></td><td>-</td><td>Float-multiplikator for visning.</td></tr>
+<tr><td><code>debounce</code></td><td>-</td><td><code>on</code>/<code>off</code>.</td></tr>
+<tr><td><code>debounce-ms</code></td><td>-</td><td>Debounce tidsvindue i ms.</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<b>Backward compatibility:</b> CLI'en accepterer både nye og gamle parameter-navne. F.eks. både <code>index-reg:100</code> og <code>reg:100</code> virker.
+</div>
+
+<h3>6.3 Overflow og ControlReg (inkl. bit 3)</h3>
+
+<p>Hver counter har et <code>controlReg</code> (holding-register) med følgende bits:</p>
+
+<table>
+<thead><tr><th>Bit</th><th>Navn</th><th>Funktion</th><th>Auto-clear</th></tr></thead>
+<tbody>
+<tr>
+  <td>0</td>
+  <td>RESET</td>
+  <td>Resetter tælleren til <code>startValue</code> og rydder <code>overflowFlag</code>.</td>
+  <td>Ja</td>
+</tr>
+<tr>
+  <td>1</td>
+  <td>START</td>
+  <td>Sætter <code>running=1</code> (tælling kører).</td>
+  <td>Ja</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td>STOP</td>
+  <td>Sætter <code>running=0</code> (stopper tælling).</td>
+  <td>Ja</td>
+</tr>
+<tr>
+  <td><strong>3</strong></td>
+  <td><strong>RESET-ON-READ</strong></td>
+  <td>Når sat, nulstilles tælleren til <code>startValue</code> hver gang dens skalerede værdi læses via Modbus FC03.</td>
+  <td><strong>Nej (sticky)</strong></td>
+</tr>
+</tbody>
+</table>
+
+<p><strong>Overflow:</strong></p>
+<ul>
+  <li>Når tælleren rammer 0 (ned) eller max (op) sættes <code>overflowFlag</code>.</li>
+  <li>Hvis <code>overflowReg</code> &lt; NUM_REGS, skrives 1 til dette register.</li>
+  <li>Ved reset (bit0) nulstilles flaget og registeret sættes til 0.</li>
+</ul>
+
+<div class="note">
+<b>Persistent bit3:</b><br>
+Bit 0–2 auto-cleares efter udførsel.<br>
+Bit 3 (reset-on-read) bevares både i <code>controlReg</code> og i config – også efter config-ændringer
+og reboot – indtil du eksplicit skriver 0 til denne bit.
+</div>
+
+<h3>6.4 Register-layout: skaleret, rå værdi og frekvens</h3>
+
+<p>Counter-data udstilles via flere holding-registre:</p>
+
+<table>
+<thead><tr><th>Register Type</th><th>Parameter</th><th>BitWidth Layout</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr>
+  <td><strong>Skaleret værdi</strong></td>
+  <td><code>index-reg</code></td>
+  <td>
+    8/16-bit: 1 reg<br>
+    32-bit: 2 regs (LSW, MSW)<br>
+    64-bit: 4 regs
+  </td>
+  <td>counterValue × scale, læses via Modbus FC03.</td>
+</tr>
+<tr>
+  <td><strong>Rå værdi (u-skaleret)</strong></td>
+  <td><code>raw-reg</code></td>
+  <td>
+    8/16-bit: 1 reg<br>
+    32-bit: 2 regs<br>
+    64-bit: 4 regs
+  </td>
+  <td>counterValue uden skalering. <strong>Ny i v3.2.0</strong> – kan konfigureres frit.</td>
+</tr>
+<tr>
+  <td><strong>Frekvens (Hz)</strong></td>
+  <td><code>freq-reg</code></td>
+  <td>1 reg (uint16)</td>
+  <td>Målt input-frekvens i Hz, opdateret hvert sekund. <strong>Ny i v3.2.0</strong>. Max 20000 Hz.</td>
+</tr>
+<tr>
+  <td><strong>Overflow flag</strong></td>
+  <td><code>overload-reg</code></td>
+  <td>1 reg</td>
+  <td>0 = ingen overflow, 1 = overflow opstået.</td>
+</tr>
+<tr>
+  <td><strong>Control register</strong></td>
+  <td><code>ctrl-reg</code></td>
+  <td>1 reg</td>
+  <td>Bit0=reset, bit1=start, bit2=stop, bit3=reset-on-read.</td>
+</tr>
+</tbody>
+</table>
+
+<pre><code>; Eksempel med nye v3.2.0 parametre:
+set counter 1 mode 1 parameter \
+  count-on:rising start-value:0 res:32 prescaler:1 \
+  index-reg:100 raw-reg:104 freq-reg:108 \
+  overload-reg:120 ctrl-reg:130 input-dis:20 \
+  direction:up scale:2.5 debounce:on debounce-ms:50
+
+; Skaleret værdi: reg 100..101 (32-bit, LSW + MSW)
+; Rå værdi:       reg 104..105 (32-bit, u-skaleret)
+; Frekvens:       reg 108 (Hz, uint16)
+; Overflow flag:  reg 120
+; Control:        reg 130
+</code></pre>
+
+<h4>6.4.1 Frekvens-måling detaljer</h4>
+<p>Frekvensen beregnes automatisk hvert sekund baseret på ændringen i counterValue:</p>
+<ul>
+  <li><strong>Opdateringsinterval:</strong> Hvert 1-2 sekund (timing window for stabilitet).</li>
+  <li><strong>Beregning:</strong> Hz = (deltaCount × 1000) / deltaTimeMs</li>
+  <li><strong>Validering:</strong> Kun opdateres hvis deltaCount < 100kHz og timing er stabil.</li>
+  <li><strong>Range:</strong> 0-20000 Hz (clamped til max 20kHz).</li>
+  <li><strong>Reset:</strong> Frekvens nulstilles ved counter reset, overflow eller hvis > 5 sek uden opdatering.</li>
+</ul>
+
+<div class="note">
+<b>Stabilitet:</b> Frekvens-beregningen er optimeret til at håndtere Modbus read/write operationer uden at producere fejlagtige værdier. Timing-vinduer og validering sikrer stabile målinger selv under høj bus-aktivitet.
+</div>
+
+<h3>6.5 Hurtig reference – Counter CLI</h3>
+
+<ul>
+  <li><code>set counter &lt;id&gt; mode 1 parameter ...</code></li>
+  <li><code>show counters</code></li>
+  <li><code>reset counter &lt;id&gt;</code></li>
+  <li><code>clear counters</code></li>
+  <li><code>no set counter &lt;id&gt;</code></li>
+  <li><code>write reg &lt;controlReg&gt; 0x0001</code> – reset</li>
+  <li><code>write reg &lt;controlReg&gt; 0x0002</code> – start</li>
+  <li><code>write reg &lt;controlReg&gt; 0x0004</code> – stop</li>
+  <li><code>write reg &lt;controlReg&gt; 0x0008</code> – reset-on-read ON</li>
+</ul>
+
+<h3>6.6 Eksempel på "show counters" output (v3.2.0)</h3>
+
+<pre><code>show counters
+-----------------------------------------------------------------------------------------------------------------------------------------
+counter | mode | co     | sv       | res | ps   | ir   | rr   | fr   | or   | cr   | dir   | sf     | dis | d   | dt   | hz    | value     | raw
+-----------------------------------------------------------------------------------------------------------------------------------------
+ 1      | 1    | rising | 0        | 32  | 1    | 100  | 104  | 108  | 120  | 130  | up    | 2.500  | 20  | on  | 50   | 1001  | 2500      | 1000
+ 2      | 1    | rising | 0        | 32  | 10   | 110  | 114  | 118  | 121  | 131  | up    | 1.000  | 21  | off | 0    | 0     | 12        | 12
+ 3      | 0    | rising | 0        | 32  | 1    | 0    | 0    | 0    | 0    | 0    | up    | 1.000  | 0   | off | 0    | 0     | 0         | 0
+ 4      | 0    | rising | 0        | 32  | 1    | 0    | 0    | 0    | 0    | 0    | up    | 1.000  | 0   | off | 0    | 0     | 0         | 0
+-----------------------------------------------------------------------------------------------------------------------------------------
+Kolonneforklaring:
+  co  = count-on (edge mode)     | sv  = startValue           | res = resolution (bitwidth)
+  ps  = prescaler                | ir  = index-reg (scaled)   | rr  = raw-reg (unscaled)
+  fr  = freq-reg (Hz register)   | or  = overload-reg         | cr  = ctrl-reg (control)
+  dir = direction (up/down)      | sf  = scaleFloat           | dis = input-dis (discrete input)
+  d   = debounce (on/off)        | dt  = debounce-time (ms)   | hz  = measured frequency (Hz)
+  value = scaled counter value   | raw = unscaled raw counter value
+-----------------------------------------------------------------------------------------------------------------------------------------</code></pre>
+
+<div class="note">
+<b>Ny i v3.2.0:</b> Kolonner <code>ir</code> (index-reg), <code>rr</code> (raw-reg), <code>fr</code> (freq-reg), <code>or</code> (overload-reg), <code>cr</code> (ctrl-reg), <code>dis</code> (input-dis), og <code>hz</code> (frekvens) bruger konsistent navngivning.
+</div>
+
+<h3>6.7 Fejlfinding (Counters)</h3>
+<ul>
+  <li>Tjek <code>show inputs</code> at input skifter som forventet.</li>
+  <li>Kontrollér at <code>running</code> er aktiv (start via controlReg eller auto-start).</li>
+  <li>Overflow-flag bliver stående indtil RESET-bit bruges.</li>
+  <li>Hvis scale &lt; 1 og værdier “springer”, skyldes det heltalsafrunding.</li>
+  <li>Ved støj – aktiver <code>debounce:on</code> og sæt passende <code>debounce-ms</code>.</li>
+  <li>Ved aktiveret reset-on-read (bit3): brug rå-registret (<code>regIndex+4..</code>) hvis du vil observere uden at nulstille.</li>
+</ul>
+
+<h3>6.8 Eksempler – Counter config og operation (v3.2.0)</h3>
+
+<b>Standard tæller med scale, debounce og frekvens-måling (ny v3.2.0 syntax)</b>
+<pre><code>set counter 1 mode 1 parameter \
+  count-on:rising start-value:0 res:32 prescaler:1 \
+  index-reg:100 raw-reg:104 freq-reg:108 \
+  overload-reg:120 ctrl-reg:130 input-dis:20 \
+  direction:up scale:2.5 debounce:on debounce-ms:50
+
+set counter 1 start enable  ; Auto-start ved boot
+save
+
+; Manual start via CLI:
+write reg 130 0x0002  ; START (bit1)
+</code></pre>
+
+<b>Læs skaleret værdi, rå værdi og frekvens</b>
+<pre><code>read reg 100  ; skaleret værdi (counterValue × 2.5)
+read reg 104  ; rå værdi (u-skaleret counterValue)
+read reg 108  ; frekvens i Hz
+</code></pre>
+
+<b>Reset-on-read aktiveret</b>
+<pre><code>set counter 1 reset-on-read enable
+
+; Eller via Modbus:
+write reg 130 0x0008   ; bit3 = 1
+
+; Hver gang skaleret værdi (reg 100..) læses via Modbus FC03,
+; nulstilles counterValue bagefter til startValue.
+; Rå værdi (reg 104) påvirkes IKKE af reset-on-read.
+</code></pre>
+
+<b>Læs frekvens uden at påvirke counter</b>
+<pre><code>; Frekvens-registret opdateres automatisk hvert sekund
+; og påvirkes ikke af reset-on-read flag.
+read reg 108  ; Hz (0-20000)
+
+; Perfekt til PLC/SCADA monitoring uden at nulstille tæller.
+</code></pre>
+
+<!-- 7. VERSIONSHISTORIK -->
+
+<h2>7. Versionshistorik (uddrag)</h2>
+
+<table>
+<thead><tr><th>Version</th><th>Dato</th><th>Ændringer</th></tr></thead>
+<tbody>
+<tr>
+  <td><strong>v3.2.0</strong></td>
+  <td>2025-11-10</td>
+  <td>
+    <ul>
+      <li><strong>NY: Counter frekvens-måling</strong>
+        <ul>
+          <li>Automatisk måling af input-frekvens (Hz) med <code>freq-reg</code> parameter.</li>
+          <li>Opdateres hvert sekund med validering og stabilitetssikring.</li>
+          <li>Håndterer Modbus bus-aktivitet uden fejlagtige værdier (timing windows, clamping 0-20kHz).</li>
+        </ul>
+      </li>
+      <li><strong>NY: Konfigurerbart raw register</strong>
+        <ul>
+          <li><code>raw-reg</code> parameter til frit valg af register for u-skaleret værdi.</li>
+          <li>Backward compatible: fallback til <code>index-reg + 4</code> hvis ikke konfigureret.</li>
+        </ul>
+      </li>
+      <li><strong>FORBEDRET: Konsistent parameter-navngivning</strong>
+        <ul>
+          <li><code>index-reg</code> (tidl. reg/count-reg) = skaleret værdi</li>
+          <li><code>raw-reg</code> (ny) = rå u-skaleret værdi</li>
+          <li><code>freq-reg</code> (ny) = frekvens i Hz</li>
+          <li><code>overload-reg</code> (tidl. overload) = overflow flag</li>
+          <li><code>ctrl-reg</code> (tidl. control/control-reg) = control bits</li>
+          <li><code>input-dis</code> (tidl. input) = discrete input index</li>
+          <li>CLI accepterer både nye og gamle navne (backward compatibility).</li>
+        </ul>
+      </li>
+      <li><strong>FORBEDRET: CLI usability</strong>
+        <ul>
+          <li>Command buffer øget til 256 characters (fra 128) for lange counter commands.</li>
+          <li>Support for både <code>res:</code> og <code>resolution:</code> parameter.</li>
+          <li><code>show counters</code> tabel opdateret med nye kolonner (ir, rr, fr, or, cr, dis, hz).</li>
+        </ul>
+      </li>
+      <li><strong>EEPROM schema opdateret til v9</strong> (CounterConfig med freq/raw fields).</li>
+      <li>RAM: 56.8% (4655 bytes), Flash: 20.1% (51058 bytes).</li>
+    </ul>
+  </td>
+</tr>
+<tr>
+  <td><strong>v3.1.7-REV6c</strong></td>
+  <td>2025-11</td>
+  <td>
+    <ul>
+      <li>Tilføjet konkrete eksempler på <code>show timers</code> og <code>show counters</code> i deres respektive sektioner.</li>
+      <li>Små justeringer af overskrifter/nummerering i Timer- og Counter-sektionerne.</li>
+    </ul>
+  </td>
+</tr>
+<tr>
+  <td><strong>v3.1.7-REV6b</strong></td>
+  <td>2025-11</td>
+  <td>
+    <ul>
+      <li>Reorganiseret manualstruktur: system → hardware → CLI → GPIO → Timers → Counters → Historik → CLI-oversigt.</li>
+      <li>Opdateret beskrivelse af Mode 4 subMode (sub=0 vs sub=1) med tydelig retrigger-logik:
+        <ul>
+          <li>sub=0: retrigger efter T1.</li>
+          <li>sub=1: retrigger efter T1+T2.</li>
+        </ul>
+      </li>
+      <li>Samlet timer-, counter- og CLI-information i dedikerede sektioner.</li>
+    </ul>
+  </td>
+</tr>
+<tr>
+  <td>v3.1.7-REV6</td>
+  <td>2025-11</td>
+  <td>
+    <ul>
+      <li>Tilknyttet globale timer-status- og kontrolregistre (<code>set timers status-reg:&lt;n&gt; control-reg:&lt;n&gt;</code>).</li>
+      <li>Dokumenteret <code>no set timer</code>, <code>no set counter</code>, <code>no set reg static</code>, <code>no set coil static</code>.</li>
+      <li>Tilføjet <code>set hostname &lt;name&gt;</code>.</li>
+      <li>Udvidet CLI-sektion med <code>gpio unmap</code> og aliaser.</li>
+      <li>Præciseret reset-on-read (bit3) som persistent ved config-ændringer.</li>
+    </ul>
+  </td>
+</tr>
+<tr>
+  <td>v3.1.7-REV5</td>
+  <td>2025-11</td>
+  <td>
+    <ul>
+      <li>Forklaring af alle kolonner i <code>show timers</code>.</li>
+      <li>Små præciseringer i Timer-sektion.</li>
+    </ul>
+  </td>
+</tr>
+<tr>
+  <td>v3.1.7</td>
+  <td>2025-11</td>
+  <td>
+    <ul>
+      <li>Rå tællerværdi i ekstra registerområde (<code>regIndex+4..</code>).</li>
+      <li><code>show counters</code> udvidet med kolonnen <code>raw</code>.</li>
+      <li>RESET-ON-READ (bit3) introduceret.</li>
+      <li>Auto-start af counters ved reboot (enabled).</li>
+      <li>Debounce på counter-inputs.</li>
+      <li>Modbus SAVE via <code>write reg 0 0x00FF</code>.</li>
+    </ul>
+  </td>
+</tr>
+<tr>
+  <td>v3.1.4</td>
+  <td>2025-05</td>
+  <td>
+    <ul>
+      <li>CounterEngine v3 introduceret (scale/prescaler, basic controlReg, overflow).</li>
+    </ul>
+  </td>
+</tr>
+</tbody>
+</table>
+
+<!-- 8. CLI-KOMMANDOOVERSIGT -->
+
+<h2>8. CLI-kommandooversigt</h2>
+
+<h3>8.1 System & persistens</h3>
+<table>
+<thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr><td><code>save</code></td><td>Gem konfiguration til EEPROM.</td></tr>
+<tr><td><code>load</code></td><td>Indlæs konfiguration fra EEPROM.</td></tr>
+<tr><td><code>defaults</code></td><td>Fabriksdefaults.</td></tr>
+<tr><td><code>reboot</code></td><td>Reboot enheden.</td></tr>
+<tr><td><code>set hostname &lt;name&gt;</code></td><td>Sæt CLI-prompt.</td></tr>
+<tr><td><code>show version</code></td><td>Vis firmwareversion.</td></tr>
+<tr><td><code>help</code>, <code>?</code></td><td>Vis kommandohjælp.</td></tr>
+</tbody>
+</table>
+
+<h3>8.2 Timer-kommandoer</h3>
+<table>
+<thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr><td><code>set timer &lt;id&gt; mode &lt;m&gt; parameter ...</code></td><td>Konfigurer timer 1–4.</td></tr>
+<tr><td><code>no set timer &lt;id&gt;</code></td><td>Deaktiver/slet timer.</td></tr>
+<tr><td><code>set timers status-reg:&lt;n&gt; control-reg:&lt;n&gt;</code></td><td>Sæt globale timer-status/-kontrolregistre.</td></tr>
+<tr><td><code>show timers</code></td><td>Vis timerstatus.</td></tr>
+</tbody>
+</table>
+
+<h3>8.3 Counter-kommandoer</h3>
+<table>
+<thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr><td><code>set counter &lt;id&gt; mode 1 parameter ...</code></td><td>Konfigurer counter 1–4 (se 6.2.3 for parametre).</td></tr>
+<tr><td><code>set counter &lt;id&gt; start ENABLE|DISABLE</code></td><td>Enable/disable auto-start ved boot <strong>(ny v3.2.0)</strong>.</td></tr>
+<tr><td><code>set counter &lt;id&gt; reset-on-read ENABLE|DISABLE</code></td><td>Enable/disable reset-on-read (bit3 i ctrl-reg) <strong>(v3.1.9)</strong>.</td></tr>
+<tr><td><code>no set counter &lt;id&gt;</code></td><td>Deaktiver/slet counter.</td></tr>
+<tr><td><code>show counters</code></td><td>Vis counterstatus (inkl. frekvens i v3.2.0).</td></tr>
+<tr><td><code>reset counter &lt;id&gt;</code></td><td>Reset én counter til startValue.</td></tr>
+<tr><td><code>clear counters</code></td><td>Reset alle counters.</td></tr>
+</tbody>
+</table>
+
+<h3>8.4 GPIO-kommandoer</h3>
+<table>
+<thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr><td><code>gpio map &lt;pin&gt; coil &lt;idx&gt;</code></td><td>Map pin til coil.</td></tr>
+<tr><td><code>gpio map &lt;pin&gt; input &lt;idx&gt;</code></td><td>Map pin til input.</td></tr>
+<tr><td><code>gpio unmap &lt;pin&gt;</code></td><td>Fjern mapping.</td></tr>
+<tr><td><code>show gpio</code></td><td>Vis mappings.</td></tr>
+</tbody>
+</table>
+
+<h3>8.5 Modbus/registre/diagnostic</h3>
+<table>
+<thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr><td><code>show coils</code></td><td>Vis coil-tilstand.</td></tr>
+<tr><td><code>show inputs</code></td><td>Vis input-tilstand.</td></tr>
+<tr><td><code>show regs [start] [count]</code></td><td>Dump holding-registre.</td></tr>
+<tr><td><code>write reg &lt;addr&gt; &lt;value&gt;</code></td><td>Skriv til holding-register (bruges også til controlReg/SAVE).</td></tr>
+<tr><td><code>write coil &lt;idx&gt; &lt;0|1&gt;</code></td><td>Sæt coil.</td></tr>
+</tbody>
+</table>
+
+<h3>8.6 Statiske reg/coil-kommandoer & oprydning</h3>
+<table>
+<thead><tr><th>Kommando</th><th>Beskrivelse</th></tr></thead>
+<tbody>
+<tr><td><code>set reg static &lt;addr&gt; value &lt;val&gt;</code></td><td>Definer statisk register.</td></tr>
+<tr><td><code>no set reg static &lt;addr&gt;</code></td><td>Fjern statisk register.</td></tr>
+<tr><td><code>set coil static &lt;idx&gt; &lt;ON|OFF|0|1&gt;</code></td><td>Definer statisk coil-tilstand.</td></tr>
+<tr><td><code>no set coil static &lt;idx&gt;</code></td><td>Fjern statisk coil-tilstand.</td></tr>
+</tbody>
+</table>
+
+<h3>8.7 CLI-aliaser og genveje</h3>
+<p>CLI’en understøtter korte aliaser:</p>
+<table>
+<thead><tr><th>Alias</th><th>Normaliseres til</th><th>Bemærkning</th></tr></thead>
+<tbody>
+<tr><td><code>sh</code></td><td><code>SHOW</code></td><td>Kort for <code>show</code>.</td></tr>
+<tr><td><code>rd</code></td><td><code>READ</code></td><td>Kort for <code>read</code>.</td></tr>
+<tr><td><code>wr</code></td><td><code>WRITE</code></td><td>Kort for <code>write</code>.</td></tr>
+<tr><td><code>dp</code></td><td><code>DUMP</code></td><td>Kort for <code>dump</code>.</td></tr>
+<tr><td><code>conf</code>, <code>cfg</code></td><td><code>SET</code></td><td>Alias til <code>set</code>.</td></tr>
+<tr><td><code>quit</code>, <code>end</code></td><td><code>EXIT</code></td><td>Afslut CLI-mode.</td></tr>
+<tr><td><code>?</code></td><td><code>HELP</code></td><td>Genvej til hjælp.</td></tr>
+<tr><td><code>sv</code></td><td><code>SAVE</code></td><td>Kort for <code>save</code>.</td></tr>
+<tr><td><code>ld</code></td><td><code>LOAD</code></td><td>Kort for <code>load</code>.</td></tr>
+<tr><td><code>def</code>, <code>default</code>, <code>defaults</code></td><td><code>DEFAULTS</code></td><td>Alle mapes til <code>defaults</code>.</td></tr>
+</tbody>
+</table>
+
+<div class="note">
+<b>Case-insensitive:</b> Kommando- og objektnavne (<code>COILS</code>, <code>TIMERS</code>, <code>COUNTERS</code> osv.)
+er case-insensitive: <code>show timers</code>, <code>SH TIMERS</code> og <code>sh timers</code> virker ens.
+</div>
+
+<hr>
+</body>
+</html>

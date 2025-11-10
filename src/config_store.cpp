@@ -52,8 +52,8 @@ bool configLoad(PersistConfig &cfg) {
     configDefaults(cfg);
     return false;
   }
-  if (cfg.schema != 8) {
-  Serial.println(F("⚠ EEPROM schema !=8 – resetting to defaults"));
+  if (cfg.schema != 9) {
+  Serial.println(F("⚠ EEPROM schema !=9 – resetting to defaults"));
   configDefaults(cfg);
   return false;
 }
@@ -66,7 +66,7 @@ bool configLoad(PersistConfig &cfg) {
 void configDefaults(PersistConfig &cfg) {
   memset(&cfg, 0, sizeof(cfg));
   cfg.magic      = 0xC0DE;
-  cfg.schema     = 8;
+  cfg.schema     = 9;
   cfg.slaveId    = SLAVE_ID;
   cfg.serverFlag = 1;
   cfg.baud       = BAUDRATE;
@@ -112,7 +112,7 @@ bool configSave(const PersistConfig &cfgIn) {
     tmp.counterAutoStartEnable[i] = counterAutoStartEnable[i];
   }
 
-  tmp.schema = 8;  // Fixed: Must match schema check in configLoad()
+  tmp.schema = 9;  // Fixed: Must match schema check in configLoad()
   computeFillCrc(tmp);
 
   EEPROM.put(0, tmp);

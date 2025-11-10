@@ -2,10 +2,13 @@
 // ============================================================================
 //  Filnavn : version.h
 //  Projekt  : Modbus RTU Server / CLI
-//  Version  : v3.1.4-patch2 (2025-11-05)
+//  Version  : v3.2.0 (2025-11-10)
 //  Forfatter: ChatGPT Automation
 //  Formål   : Global versions-info og ændringshistorik
 //  Ændringer:
+//    - v3.2.0: CounterEngine frequency measurement (freq-reg), raw register
+//              (raw-reg), consistent parameter naming (index-reg, overload-reg,
+//              ctrl-reg, input-dis), EEPROM schema v9.
 //    - v3.1.4-patch2: CounterEngine v3 – debounce pr. counter-kanal
 //                     (debounceEnable + debounceTimeMs), CLI-udvidelse
 //                     med debounce:on|off og debounce-ms:<n>.
@@ -14,18 +17,33 @@
 // ============================================================================
 
 #define VERSION_MAJOR    3
-#define VERSION_MINOR    1
-#define VERSION_PATCH    9
+#define VERSION_MINOR    2
+#define VERSION_PATCH    0
 #ifndef VERSION_STRING
-#define VERSION_STRING  "v3.1.9"
+#define VERSION_STRING  "v3.2.0"
 #endif
 #ifndef VERSION_BUILD
-#define VERSION_BUILD   "20251109"
+#define VERSION_BUILD   "20251110"
 #endif
 
 // ============================================================================
 //  CHANGELOG (uddrag)
 // ============================================================================
+//
+//  v3.2.0 (2025-11-10)
+//   • NEW: Counter frequency measurement (currentFreqHz) med freq-reg parameter
+//   • NEW: Raw counter register (raw-reg) separat fra skaleret værdi
+//   • IMPROVED: Konsistent parameter-navngivning for counter commands:
+//       - index-reg (tidl. count-reg) = skaleret værdi
+//       - raw-reg = rå u-skaleret værdi (ny)
+//       - freq-reg = målt frekvens i Hz (ny)
+//       - overload-reg (tidl. overload) = overflow flag
+//       - ctrl-reg (tidl. control-reg) = control bits
+//       - input-dis (tidl. input) = discrete input index
+//   • EEPROM schema opdateret til v9 (CounterConfig med freq/raw fields)
+//   • CLI help opdateret med ny parameter syntax
+//   • "show counters" viser nu også freq (Hz) kolonne
+//   • Backward compatibility: CLI parser accepterer både gamle og nye navne
 //
 //  v3.1.9 (2025-11-09)
 //   • MAJOR: Counter reset-on-read er nu individuel pr. counter via global

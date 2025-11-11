@@ -2,10 +2,12 @@
 // ============================================================================
 //  Filnavn : version.h
 //  Projekt  : Modbus RTU Server / CLI
-//  Version  : v3.2.0 (2025-11-10)
+//  Version  : v3.3.0 (2025-11-11) - Hardware Counter Engine
 //  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Global versions-info og ændringshistorik
 //  Ændringer:
+//    - v3.3.0: Hybrid HW/SW Counter Engine (hw-mode selection, DYNAMIC GPIO,
+//              improved CLI display, fixed SAVE overflow), EEPROM schema v10.
 //    - v3.2.0: CounterEngine frequency measurement (freq-reg), raw register
 //              (raw-reg), consistent parameter naming (index-reg, overload-reg,
 //              ctrl-reg, input-dis), EEPROM schema v9.
@@ -17,18 +19,35 @@
 // ============================================================================
 
 #define VERSION_MAJOR    3
-#define VERSION_MINOR    2
+#define VERSION_MINOR    3
 #define VERSION_PATCH    0
 #ifndef VERSION_STRING
-#define VERSION_STRING  "v3.2.0"
+#define VERSION_STRING  "v3.3.0"
 #endif
 #ifndef VERSION_BUILD
-#define VERSION_BUILD   "20251110"
+#define VERSION_BUILD   "20251111"
 #endif
 
 // ============================================================================
 //  CHANGELOG (uddrag)
 // ============================================================================
+//
+//  v3.3.0 (2025-11-11) - Hardware Counter Engine with HW/SW Selection
+//   • NEW: Hybrid HW/SW Counter Engine (CounterEngine v4):
+//       - Hardware Mode: Direct timer input (T1/T3/T4/T5 on pins 5/47/6/46)
+//       - Software Mode: GPIO pin-based edge detection
+//       - Explicit timer selection via hw-mode parameter
+//       - Automatic GPIO mapping (DYNAMIC) for HW mode
+//   • NEW: Improved CLI configuration display:
+//       - Separate discrete input (input-dis) vs GPIO pin display
+//       - DYNAMIC GPIO mappings in GPIO section
+//       - Corrected pin column in "show counters" (actual GPIO pins)
+//   • BUGFIX: Fixed SAVE command stack overflow (global config allocation)
+//   • EEPROM schema updated to v10 (added hwMode field to CounterConfig)
+//   • CLI parser: hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5> parameter
+//   • configSave() optimized: single verify buffer, const_cast on reference
+//   • Backward compatible with v3.2.0 configurations
+//   • RAM: 82.4%, Flash: 21.2%
 //
 //  v3.2.0 (2025-11-10)
 //   • NEW: Counter frequency measurement (currentFreqHz) med freq-reg parameter

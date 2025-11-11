@@ -1,9 +1,9 @@
 // ============================================================================
 //  Filnavn : config_store.cpp
 //  Projekt  : Modbus RTU Server / CLI
-//  Version  : v3.1.7 (CounterEngine v3 + Timer status/control)
+//  Version  : v3.3.0 (Hybrid HW/SW Counter Engine)
 //  Forfatter: JanG at modbus_slave@laces.dk
-//  Formål   : EEPROM persistence – schema v5 (CounterEngine v3 + debounce)
+//  Formål   : EEPROM persistence – schema v10 (CounterEngine v4 with hw-mode)
 // ============================================================================
 #include "modbus_core.h"
 #include "modbus_globals.h"
@@ -47,17 +47,53 @@ static bool isSupportedBaud(unsigned long nb) {
 // ============================================================================
 bool configLoad(PersistConfig &cfg) {
   EEPROM.get(0, cfg);
-  if (cfg.magic != 0xC0DE || !checkCrc(cfg)) {
-    Serial.println(F("⚠ EEPROM invalid – resetting to defaults"));
+
+  // Check magic and CRC
+  if (cfg.magic != 0xC0DE) {
+    Serial.println(F("! EEPROM magic invalid"));
     configDefaults(cfg);
-    return false;
+    return false;  // Let main.cpp handle save
   }
-  if (cfg.schema != 9) {
-  Serial.println(F("⚠ EEPROM schema !=9 – resetting to defaults"));
+
+  // Schema check BEFORE CRC (CRC layout may have changed)
+  if (cfg.schema != 9 && cfg.schema != 10) {
+    Serial.println(F("! EEPROM schema unknown"));
+    configDefaults(cfg);
+    return false;  // Let main.cpp handle save
+  }
+
+  // For schema 9->10 migration: just report and use defaults
+  if (cfg.schema == 9) {
+    Serial.println(F("! EEPROM schema 9 (old) - upgrading to 10"));
+    // Save the old settings we want to keep
+    uint8_t oldSlaveId = cfg.slaveId;
+    uint32_t oldBaud = cfg.baud;
+    uint8_t oldServerFlag = cfg.serverFlag;
+
+    // Reset to defaults (this will set schema=10 and initialize hwMode=0)
+    configDefaults(cfg);
+
+    // Restore old settings
+    cfg.slaveId = oldSlaveId;
+    cfg.baud = oldBaud;
+    cfg.serverFlag = oldServerFlag;
+
+    return false;  // Let main.cpp handle save with migration settings
+  }
+
+  // Schema 10 validation
+  if (cfg.schema == 10) {
+    if (!checkCrc(cfg)) {
+      Serial.println(F("! EEPROM CRC invalid"));
+      configDefaults(cfg);
+      return false;  // Let main.cpp handle save
+    }
+    return true;
+  }
+
+  // Fallback
   configDefaults(cfg);
   return false;
-}
-  return true;
 }
 
 // ============================================================================
@@ -66,7 +102,7 @@ bool configLoad(PersistConfig &cfg) {
 void configDefaults(PersistConfig &cfg) {
   memset(&cfg, 0, sizeof(cfg));
   cfg.magic      = 0xC0DE;
-  cfg.schema     = 9;
+  cfg.schema     = 10;  // Updated to v10 for hw-mode support
   cfg.slaveId    = SLAVE_ID;
   cfg.serverFlag = 1;
   cfg.baud       = BAUDRATE;
@@ -97,29 +133,35 @@ void configDefaults(PersistConfig &cfg) {
 // ============================================================================
 //  SAVE
 // ============================================================================
+// Use globalConfig directly to save RAM (passed by reference)
+// Only need one static temp for verification
+static PersistConfig verifyTempConfig;
+
 bool configSave(const PersistConfig &cfgIn) {
-  PersistConfig tmp = cfgIn;
+  // Cast away const to work with cfgIn directly (saves 1KB RAM)
+  PersistConfig &cfg = const_cast<PersistConfig&>(cfgIn);
 
   // Gem globale timer status/control registre
-  tmp.timerStatusReg     = timerStatusRegIndex;
-  tmp.timerStatusCtrlReg = timerStatusCtrlRegIndex;
+  cfg.timerStatusReg     = timerStatusRegIndex;
+  cfg.timerStatusCtrlReg = timerStatusCtrlRegIndex;
 
-  strncpy(tmp.hostname, cliHostname, sizeof(tmp.hostname));
+  strncpy(cfg.hostname, cliHostname, sizeof(cfg.hostname));
 
   // Gem counter reset-on-read enable flags
   for (uint8_t i = 0; i < 4; ++i) {
-    tmp.counterResetOnReadEnable[i] = counterResetOnReadEnable[i];
-    tmp.counterAutoStartEnable[i] = counterAutoStartEnable[i];
+    cfg.counterResetOnReadEnable[i] = counterResetOnReadEnable[i];
+    cfg.counterAutoStartEnable[i] = counterAutoStartEnable[i];
   }
 
-  tmp.schema = 9;  // Fixed: Must match schema check in configLoad()
-  computeFillCrc(tmp);
+  cfg.schema = 10;  // Fixed: Must match schema check in configLoad() - v10 for hw-mode
+  computeFillCrc(cfg);
 
-  EEPROM.put(0, tmp);
+  EEPROM.put(0, cfg);
 
-  PersistConfig verify;
-  EEPROM.get(0, verify);
-  return (verify.magic == tmp.magic && verify.schema == tmp.schema && verify.crc == tmp.crc);
+  EEPROM.get(0, verifyTempConfig);
+  return (verifyTempConfig.magic == cfg.magic &&
+          verifyTempConfig.schema == cfg.schema &&
+          verifyTempConfig.crc == cfg.crc);
 }
 
 // ============================================================================

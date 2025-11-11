@@ -160,6 +160,9 @@ struct PersistConfig {
 // ============================================================================
 //  Prototyper for config-store
 // ============================================================================
+// Global config instance (avoid stack overflow - struct is >1KB)
+extern PersistConfig globalConfig;
+
 bool configLoad(PersistConfig &cfg);
 void configDefaults(PersistConfig &cfg);
 bool configSave(const PersistConfig &cfg);

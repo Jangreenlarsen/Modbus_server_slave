@@ -408,6 +408,7 @@ static void print_counters_config_block(bool onlyEnabled) {
     if (scaleDec < 10) Serial.print('0');
     Serial.print(scaleDec);
 
+    // Display input-dis (discrete input index)
     Serial.print(F(" input-dis=")); Serial.print(c.inputIndex);
     Serial.print(F(" index-reg=")); Serial.print(c.regIndex);
     if (c.rawReg > 0 && c.rawReg < NUM_REGS) {
@@ -430,6 +431,21 @@ static void print_counters_config_block(bool onlyEnabled) {
       Serial.print(F("ms"));
     } else {
       Serial.print(F("off"));
+    }
+
+    Serial.print(F(" hw-mode="));
+    if (c.hwMode == 0) {
+      Serial.print(F("SW"));
+    } else if (c.hwMode == 1) {
+      Serial.print(F("HW-T1"));
+    } else if (c.hwMode == 3) {
+      Serial.print(F("HW-T3"));
+    } else if (c.hwMode == 4) {
+      Serial.print(F("HW-T4"));
+    } else if (c.hwMode == 5) {
+      Serial.print(F("HW-T5"));
+    } else {
+      Serial.print(F("HW-UNKNOWN"));
     }
 
     Serial.println();
@@ -476,6 +492,8 @@ static void print_counters_config_block(bool onlyEnabled) {
 static void print_gpio_config_block() {
   Serial.println(F("gpio"));
   bool any = false;
+
+  // Static GPIO mappings (user-configured via "gpio map" command)
   for (uint8_t pin = 0; pin < MAX_GPIO_PINS; ++pin) {
     int16_t ci = gpioToCoil[pin];
     int16_t di = gpioToInput[pin];
@@ -490,6 +508,31 @@ static void print_gpio_config_block() {
       Serial.print(F(" at input ")); Serial.println(di);
     }
   }
+
+  // DYNAMIC GPIO mappings from HW counters
+  for (uint8_t i = 0; i < 4; ++i) {
+    const CounterConfig& c = counters[i];
+    if (!c.enabled || c.hwMode == 0) continue;  // Only HW mode counters
+
+    any = true;
+    Serial.print(F("  gpio "));
+    if (c.hwMode == 1) Serial.print(F("5"));
+    else if (c.hwMode == 3) Serial.print(F("47"));
+    else if (c.hwMode == 4) Serial.print(F("6"));
+    else if (c.hwMode == 5) Serial.print(F("46"));
+
+    Serial.print(F(" DYNAMIC at input "));
+    Serial.print(c.inputIndex);
+    Serial.print(F(" (counter"));
+    Serial.print(c.id);
+    Serial.print(F(" HW-T"));
+    if (c.hwMode == 1) Serial.print(F("1"));
+    else if (c.hwMode == 3) Serial.print(F("3"));
+    else if (c.hwMode == 4) Serial.print(F("4"));
+    else if (c.hwMode == 5) Serial.print(F("5"));
+    Serial.println(F(")"));
+  }
+
   if (!any) {
     Serial.println(F("  (no gpio mappings)"));
   }
@@ -1098,6 +1141,29 @@ uint8_t start = 5;
       continue;
     }
 
+    // hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5> (NEW v3.3.0 with timer selection)
+    if (!strncasecmp(p, "hw-mode:", 8)) {
+      const char* v = p + 8;
+      if (!strcasecmp(v, "sw") || !strcasecmp(v, "0")) {
+        cfg.hwMode = 0;  // Software mode
+      } else if (!strcasecmp(v, "hw") || !strcasecmp(v, "1")) {
+        cfg.hwMode = 1;  // Hardware mode - legacy (defaults to Timer1)
+      } else if (!strcasecmp(v, "hw-t1")) {
+        cfg.hwMode = 1;  // Hardware Timer1 (Pin 5/T1)
+        // inputIndex is discrete input, NOT GPIO - user must specify via input-dis
+      } else if (!strcasecmp(v, "hw-t3")) {
+        cfg.hwMode = 3;  // Hardware Timer3 (Pin 47/T3)
+      } else if (!strcasecmp(v, "hw-t4")) {
+        cfg.hwMode = 4;  // Hardware Timer4 (Pin 6/T4)
+      } else if (!strcasecmp(v, "hw-t5")) {
+        cfg.hwMode = 5;  // Hardware Timer5 (Pin 46/T5)
+      } else {
+        Serial.println(F("% Invalid hw-mode (use sw|hw-t1|hw-t3|hw-t4|hw-t5)"));
+        return;
+      }
+      continue;
+    }
+
     // Ukendt parameter
     Serial.print(F("% Unknown parameter: ")); Serial.println(p);
     return;
@@ -1562,56 +1628,56 @@ if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "COIL") &
 // ---------- Persistence ----------
 static void cmd_persist(const char* verb) {
   if (!strcmp(verb,"SAVE")) {
-    PersistConfig cfg;
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.magic      = 0xC0DE;
-    cfg.schema     = 6;   // schema v6 for CounterEngine v3 (+ debounce)
-    cfg.reserved   = 0;
-    cfg.slaveId    = currentSlaveID;
-    cfg.serverFlag = serverRunning ? 1 : 0;
-    cfg.baud       = currentBaudrate;
-    cfg.timerStatusReg     = timerStatusRegIndex;
-    cfg.timerStatusCtrlReg = timerStatusCtrlRegIndex;
+    // Use global config to avoid stack overflow
+    memset(&globalConfig, 0, sizeof(globalConfig));
+    globalConfig.magic      = 0xC0DE;
+    globalConfig.schema     = 6;   // schema v6 for CounterEngine v3 (+ debounce)
+    globalConfig.reserved   = 0;
+    globalConfig.slaveId    = currentSlaveID;
+    globalConfig.serverFlag = serverRunning ? 1 : 0;
+    globalConfig.baud       = currentBaudrate;
+    globalConfig.timerStatusReg     = timerStatusRegIndex;
+    globalConfig.timerStatusCtrlReg = timerStatusCtrlRegIndex;
 
     // statiske maps
-    cfg.regStaticCount  = regStaticCount;
-    for (uint8_t i = 0; i < cfg.regStaticCount && i < MAX_STATIC_REGS; i++) {
-      cfg.regStaticAddr[i] = regStaticAddr[i];
-      cfg.regStaticVal [i] = regStaticVal [i];
+    globalConfig.regStaticCount  = regStaticCount;
+    for (uint8_t i = 0; i < globalConfig.regStaticCount && i < MAX_STATIC_REGS; i++) {
+      globalConfig.regStaticAddr[i] = regStaticAddr[i];
+      globalConfig.regStaticVal [i] = regStaticVal [i];
     }
-    cfg.coilStaticCount = coilStaticCount;
-    for (uint8_t i = 0; i < cfg.coilStaticCount && i < MAX_STATIC_COILS; i++) {
-      cfg.coilStaticIdx[i] = coilStaticIdx[i];
-      cfg.coilStaticVal[i] = coilStaticVal[i] ? 1 : 0;
+    globalConfig.coilStaticCount = coilStaticCount;
+    for (uint8_t i = 0; i < globalConfig.coilStaticCount && i < MAX_STATIC_COILS; i++) {
+      globalConfig.coilStaticIdx[i] = coilStaticIdx[i];
+      globalConfig.coilStaticVal[i] = coilStaticVal[i] ? 1 : 0;
     }
 
     // timere: gem alle 4
-    cfg.timerCount = 4;
+    globalConfig.timerCount = 4;
     for (uint8_t i = 0; i < 4; i++) {
-      cfg.timer[i] = timers[i];
+      globalConfig.timer[i] = timers[i];
     }
 
     // Counters: gem alle 4 (enabled-flag og config afgør brugen)
-    cfg.counterCount = 4;
+    globalConfig.counterCount = 4;
     for (uint8_t i = 0; i < 4; i++) {
-      cfg.counter[i] = counters[i];
+      globalConfig.counter[i] = counters[i];
     }
 
     // gem GPIO mapping
     for (uint8_t i = 0; i < MAX_GPIO_PINS; i++) {
-      cfg.gpioToCoil[i]  = gpioToCoil[i];
-      cfg.gpioToInput[i] = gpioToInput[i];
+      globalConfig.gpioToCoil[i]  = gpioToCoil[i];
+      globalConfig.gpioToInput[i] = gpioToInput[i];
     }
 
-    if (configSave(cfg)) Serial.println(F("OK: config saved to EEPROM"));
-    else                 Serial.println(F("% Save failed"));
+    if (configSave(globalConfig)) Serial.println(F("OK: config saved to EEPROM"));
+    else                          Serial.println(F("% Save failed"));
     return;
   }
 
   if (!strcmp(verb,"LOAD")) {
-    PersistConfig cfg;
-    if (configLoad(cfg)) {
-      configApply(cfg);
+    // Use global config to avoid stack overflow
+    if (configLoad(globalConfig)) {
+      configApply(globalConfig);
       Serial.println(F("OK: config loaded and applied"));
     } else {
       Serial.println(F("% Invalid EEPROM config (use 'defaults' to reset)"));
@@ -1620,10 +1686,10 @@ static void cmd_persist(const char* verb) {
   }
 
   if (!strcmp(verb,"DEFAULTS")) {
-    PersistConfig cfg;
-    configDefaults(cfg);
-    if (configSave(cfg)) {
-      configApply(cfg);
+    // Use global config to avoid stack overflow
+    configDefaults(globalConfig);
+    if (configSave(globalConfig)) {
+      configApply(globalConfig);
       Serial.println(F("OK: defaults applied & saved"));
     } else {
       Serial.println(F("% Could not save defaults"));
@@ -1664,6 +1730,7 @@ static void cmd_help() {
   Serial.println(F("   index-reg:<reg> raw-reg:<reg> freq-reg:<reg> overload-reg:<reg> ctrl-reg:<reg>"));
   Serial.println(F("   input-dis:<di_idx> direction:<up|down> scale:<float>"));
   Serial.println(F("   debounce:<on|off> [debounce-ms:<ms>]"));
+  Serial.println(F("   hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5> [v3.3.0 - select HW timer (T1=pin5, T3=pin47, T4=pin6, T5=pin46)]"));
   Serial.println(F(" set counter <id> reset-on-read ENABLE|DISABLE"));
   Serial.println(F("   - Enable/disable counter reset-on-read (bit 3 in control register)"));
   Serial.println(F(" set counter <id> start ENABLE|DISABLE"));

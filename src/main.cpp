@@ -7,6 +7,10 @@
 #include <Arduino.h>
 #include "modbus_core.h"
 #include "version.h"
+#include <avr/wdt.h>
+
+// Global config (avoid stack overflow - struct is >1KB)
+PersistConfig globalConfig;
 
 static void print_banner() {
   Serial.println(F("=== MODBUS RTU SLAVE ==="));
@@ -16,6 +20,16 @@ static void print_banner() {
 }
 
 void setup() {
+  // Disable watchdog immediately (prevent boot loop on EEPROM issues)
+  wdt_disable();
+
+  // CRITICAL: Disable all timer interrupts before any other init
+  // This prevents ISR corruption of Serial/timing during boot
+  TIMSK1 = 0x00;  // Timer1 (used by HW counter 1)
+  TIMSK3 = 0x00;  // Timer3 (used by HW counter 2)
+  TIMSK4 = 0x00;  // Timer4 (used by HW counter 3)
+  TIMSK5 = 0x00;  // Timer5 (used by HW counter 4)
+
   pinMode(LED_BUILTIN, OUTPUT);
   Serial.begin(115200);
   delay(500);
@@ -23,13 +37,22 @@ void setup() {
   print_banner();
 
   // Load persisted config (or defaults) and apply before initModbus()
-  PersistConfig cfg;
-  if (!configLoad(cfg)) {
-    Serial.println(F("% No valid config in EEPROM -> using defaults"));
-    configDefaults(cfg);
-    (void)configSave(cfg);
+  // Use global to avoid stack overflow (struct is >1KB)
+  bool configValid = configLoad(globalConfig);
+
+  if (!configValid) {
+    Serial.println(F("% Loading defaults and saving to EEPROM"));
+    // configLoad() already set globalConfig to defaults if invalid
+    if (!configSave(globalConfig)) {
+      Serial.println(F("! Warning: Could not save config to EEPROM"));
+    } else {
+      Serial.println(F("✓ Config saved"));
+    }
+  } else {
+    Serial.println(F("✓ Config loaded from EEPROM"));
   }
-  configApply(cfg);
+
+  configApply(globalConfig);
 
   initModbus();
   Serial.println(F("% Modbus core initialized"));

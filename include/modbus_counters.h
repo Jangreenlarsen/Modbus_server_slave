@@ -51,41 +51,43 @@ enum CounterDirection : uint8_t {
 };
 
 // ============================================================================
-//  CounterConfig v3 (schema v5)
+//  CounterConfig v4 (schema v10) - v3.3.0
 // ============================================================================
 //
 //  Felter:
 //   id             : 1..4 (logisk id)
 //   enabled        : 0/1
+//   hwMode         : 0=SW, 1=HW (NEW in v3.3.0) - bruger hardware timer
 //   edgeMode       : CNT_EDGE_*
 //   direction      : CNT_DIR_UP / CNT_DIR_DOWN
 //   bitWidth       : 8 / 16 / 32 / 64 (intern maske / antal ud-regs)
-//   prescaler      : antal edges pr. tællerskridt (1..256)
-//   inputIndex     : discrete input index (0..NUM_DISCRETE-1)
+//   prescaler      : antal edges pr. tællerskridt (1..256) eller HW prescale mode
+//   inputIndex     : discrete input index (0..NUM_DISCRETE-1) [SW mode]
 //   regIndex       : base holding register for skaleret værdi
 //   controlReg     : holding-reg med bitmask (bit0=reset,1=start,2=stop)
 //   overflowReg    : holding-reg hvor overflowFlag spejles (0/1)
 //   startValue     : initial værdi ved reset/overflow
 //   scale          : float faktor (1.0 = ingen skalering)
-//   counterValue   : rå tællerværdi (før scaling)
+//   counterValue   : rå tællerværdi (før scaling) [SW mode]
 //   running        : 0/1 (kun aktiv når enabled && running)
 //   overflowFlag   : 0/1 (sættes ved overflow / underflow)
-//   lastLevel      : sidste input-niveau (edge detect)
-//   edgeCount      : rå edge-counter til prescaler
-//   debounceEnable : 0/1 – aktiverer debounce på input
-//   debounceTimeMs : debounce-vindue i millisekunder
-//   lastEdgeMs     : tidspunkt (millis) for sidste accepterede edge
+//   lastLevel      : sidste input-niveau (edge detect) [SW mode]
+//   edgeCount      : rå edge-counter til prescaler [SW mode]
+//   debounceEnable : 0/1 – aktiverer debounce på input [SW mode]
+//   debounceTimeMs : debounce-vindue i millisekunder [SW mode]
+//   lastEdgeMs     : tidspunkt (millis) for sidste accepterede edge [SW mode]
 //
 struct CounterConfig {
   // Konfiguration
   uint8_t   id;          // 1..4
   uint8_t   enabled;     // 0/1
+  uint8_t   hwMode;      // 0=SW polling, 1=HW interrupt (NEW v3.3.0)
   uint8_t   edgeMode;    // CounterEdge
   uint8_t   direction;   // CounterDirection (0=UP,1=DOWN)
 
   uint8_t   bitWidth;    // 8/16/32/64
-  uint8_t   prescaler;   // 1..256
-  uint16_t  inputIndex;  // discrete input index
+  uint8_t   prescaler;   // SW: 1..256 (edges per step) | HW: 0=off, 1=ext-clock, 2-6=prescale
+  uint16_t  inputIndex;  // discrete input index (SW mode only)
 
   uint16_t  regIndex;    // base holding register for skaleret værdi (index-reg)
   uint16_t  rawReg;      // holding register for rå værdi (raw-reg)
@@ -96,21 +98,21 @@ struct CounterConfig {
   uint32_t  startValue;  // init-værdi ved reset
   float     scale;       // skaleringsfaktor (1.0 = ingen skalering)
 
-  // Runtime-felter
-  uint64_t  counterValue;   // rå tællerværdi
+  // Runtime-felter (SW mode primarily)
+  uint64_t  counterValue;   // rå tællerværdi (SW mode)
   uint8_t   running;        // 0/1
   uint8_t   overflowFlag;   // 0/1
-  uint8_t   lastLevel;      // 0/1 til edge-detektering
-  uint32_t  edgeCount;      // raw edge count (før prescaler)
+  uint8_t   lastLevel;      // 0/1 til edge-detektering (SW mode)
+  uint32_t  edgeCount;      // raw edge count (før prescaler) (SW mode)
 
-  // Debounce (v3.1.4-patch2)
+  // Debounce (v3.1.4-patch2, SW mode only)
   uint8_t       debounceEnable;  // 0=off, 1=on
   uint16_t      debounceTimeMs;  // debounce-tid i ms
   unsigned long lastEdgeMs;      // timestamp for sidste accepterede edge
 
-  // Frekvens-måling (v3.2.0)
-  uint64_t      lastCountForFreq;   // sidste count ved frekvens-beregning
-  unsigned long lastFreqCalcMs;     // timestamp for sidste frekvens-beregning
+  // Frekvens-måling (v3.2.0, both modes)
+  uint64_t      lastCountForFreq;   // sidste count ved frekvens-beregning (SW)
+  unsigned long lastFreqCalcMs;     // timestamp for sidste frekvens-beregning (SW)
   uint16_t      currentFreqHz;      // senest målte frekvens i Hz
 
   // Persistent control-flags (fx reset-on-read)

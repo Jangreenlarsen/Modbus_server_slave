@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8" />
+<title>Modbus RTU Server v3.3.0 – Hardware/Software Counter Engine Manual</title>
+<style>
+body {font-family: system-ui, sans-serif; line-height:1.6; max-width:1200px; margin:auto; padding:2rem; background:#f7f7f9; color:#222;}
+h1,h2,h3,h4{color:#222; margin-top:1.5rem;}
+h1{border-bottom:3px solid #004a99; padding-bottom:0.5rem;}
+h2{border-bottom:1px solid #ccc; padding-bottom:0.3rem;}
+code{background:#e8e8e8;padding:0.1rem 0.3rem;border-radius:3px; font-family:monospace;}
+pre{background:#dde1e7;color:#111;padding:1rem;border-radius:4px;overflow-x:auto; font-family:monospace; font-size:0.9rem;}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:0.9rem;}
+th,td{border:1px solid #ccc;padding:0.4rem 0.6rem;text-align:left;vertical-align:top;}
+th{background:#e9e9ef; font-weight:bold;}
+.note{padding:0.8rem 1rem;background:#eef7ff;border-left:4px solid #005bbb;margin:1rem 0; border-radius:3px;}
+.warning{padding:0.8rem 1rem;background:#fff3cd;border-left:4px solid #ff9800;margin:1rem 0; border-radius:3px;}
+.quickref{background:#ddeeff;padding:1rem;border-left:4px solid #004a99;margin:1rem 0;border-radius:4px;}
+.toc{background:#f0f0f0;padding:1rem;border-left:4px solid #666;margin:1rem 0;border-radius:3px;}
+hr{margin:2rem 0; border:none; border-top:1px solid #ccc;}
+ul,ol{margin:0.5rem 0; padding-left:2rem;}
+li{margin:0.3rem 0;}
+.version-badge{display:inline-block; background:#005bbb; color:white; padding:0.3rem 0.6rem; border-radius:3px; font-size:0.9rem; margin-left:0.5rem;}
+</style>
+</head>
+<body>
+
+<h1>Modbus RTU Server v3.3.0 – Hardware/Software Counter Engine Manual<span class="version-badge">v3.3.0</span></h1>
+
+<p><strong>Status:</strong> Production Ready ✅</p>
+<p><strong>Build Date:</strong> 2025-11-11</p>
+<p><strong>Platform:</strong> Arduino Mega 2560 (ATmega2560 @ 16 MHz)</p>
+<p><strong>EEPROM Schema:</strong> v10 (HW counter support)</p>
+<p><strong>Resource Usage:</strong> RAM: 82.4% (6751 / 8192 bytes) | Flash: 21.2% (53956 / 253952 bytes)</p>
+
+<div class="quickref">
+<b>📋 Quick Access</b>
+<ol>
+  <li><a href="#intro">Introduktion</a></li>
+  <li><a href="#hardware">Hardware Setup</a></li>
+  <li><a href="#quickstart">Quick Start</a></li>
+  <li><a href="#counter">Counter Engine v4 (HW/SW)</a></li>
+  <li><a href="#timer">Timer Engine v2</a></li>
+  <li><a href="#gpio">GPIO Management</a></li>
+  <li><a href="#cliref">CLI Command Reference</a></li>
+  <li><a href="#examples">Practical Examples</a></li>
+  <li><a href="#troubleshooting">Troubleshooting</a></li>
+  <li><a href="#versions">Version History</a></li>
+</ol>
+</div>
+
+<hr>
+
+<h2 id="intro">Introduktion</h2>
+
+<p>Modbus RTU Server v3.3.0 er et production-ready embedded system for Arduino Mega 2560, der implementerer en fuldstændig Modbus RTU slave server med avancerede features:</p>
+
+<ul>
+  <li><strong>Modbus RTU Server:</strong> Komplet protokol-implementering med RS-485 support</li>
+  <li><strong>Counter Engine v4:</strong> 4 uafhængige tællere med hybrid HW/SW modes</li>
+  <li><strong>Timer Engine v2:</strong> 4 uafhængige programmérbare timere (4 modes)</li>
+  <li><strong>Interactive CLI:</strong> Cisco-style shell over USB serial</li>
+  <li><strong>EEPROM Persistence:</strong> Konfiguration gemt i non-volatile memory (schema v10)</li>
+</ul>
+
+<h3>Nyheder i v3.3.0</h3>
+
+<ul>
+  <li><strong>🆕 Hardware Counter Mode</strong> – Direkte hardware timer input (T1/T3/T4/T5 på pins 5/47/6/46)</li>
+  <li><strong>🆕 Software Fallback Mode</strong> – GPIO pin-baseret edge detection med flexibel pin-udvælgelse</li>
+  <li><strong>🆕 Automatic GPIO Management</strong> – DYNAMIC mappings for HW counters</li>
+  <li><strong>🆕 Improved CLI Display</strong> – Separate discrete input vs GPIO pin columns</li>
+  <li><strong>✅ Fixed SAVE Command</strong> – Global config allocation eliminerer stack overflow</li>
+  <li><strong>📊 EEPROM Schema v10</strong> – Ny hw-mode field i CounterConfig</li>
+</ul>
+
+<hr>
+
+<h2 id="hardware">Hardware Setup</h2>
+
+<h3>Board Configuration</h3>
+
+<table>
+<thead><tr><th>Specification</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Platform</td><td>Arduino Mega 2560 (ATmega2560 @ 16 MHz)</td></tr>
+<tr><td>RAM</td><td>8 KB (82.4% used)</td></tr>
+<tr><td>Flash</td><td>256 KB (21.2% used)</td></tr>
+<tr><td>EEPROM</td><td>4 KB (configuration storage)</td></tr>
+</tbody>
+</table>
+
+<h3>Pin Assignments</h3>
+
+<table>
+<thead><tr><th>Pin(s)</th><th>Function</th><th>Purpose</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>0–1</td><td>USB Serial</td><td>Debug CLI @ 115200 baud</td><td>Don't map as GPIO</td></tr>
+<tr><td>18–19</td><td>Modbus RTU (Serial1)</td><td>RS-485 data</td><td>Reserved for Modbus</td></tr>
+<tr><td>8</td><td>RS-485 DIR Pin</td><td>Transceiver direction control</td><td>Do not use for GPIO</td></tr>
+<tr><td>13</td><td>LED Heartbeat</td><td>1 Hz toggle indicator</td><td>User LED output</td></tr>
+<tr><td><strong>5</strong></td><td><strong>Timer1 (HW Counter)</strong></td><td><strong>Hardware input capture (ICP1)</strong></td><td><strong>HW mode only</strong></td></tr>
+<tr><td><strong>47</strong></td><td><strong>Timer3 (HW Counter)</strong></td><td><strong>Hardware input capture (ICP3)</strong></td><td><strong>HW mode only</strong></td></tr>
+<tr><td><strong>6</strong></td><td><strong>Timer4 (HW Counter)</strong></td><td><strong>Hardware input capture (ICP4)</strong></td><td><strong>HW mode only</strong></td></tr>
+<tr><td><strong>46</strong></td><td><strong>Timer5 (HW Counter)</strong></td><td><strong>Hardware input capture (ICP5)</strong></td><td><strong>HW mode only</strong></td></tr>
+<tr><td>2–4, 7, 9–12, 14–17, 20–45, 48–53</td><td>GPIO</td><td>Available for digital I/O</td><td>Use for SW counters, timers, mappings</td></tr>
+</tbody>
+</table>
+
+<h3>RS-485 Wiring</h3>
+
+<table>
+<thead><tr><th>Arduino Mega 2560</th><th>RS-485 Module</th><th>Function</th></tr></thead>
+<tbody>
+<tr><td>Pin 18 (TX1)</td><td>DI</td><td>Data transmit</td></tr>
+<tr><td>Pin 19 (RX1)</td><td>RO</td><td>Data receive</td></tr>
+<tr><td>Pin 8</td><td>DE + RE</td><td>Driver/Receiver enable</td></tr>
+<tr><td>VCC</td><td>VCC</td><td>5V power</td></tr>
+<tr><td>GND</td><td>GND</td><td>Ground</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2 id="quickstart">Quick Start</h2>
+
+<h3>1. Build and Upload</h3>
+
+<pre><code>cd Modbus_server_slave
+code .                    # Open in VS Code
+pio run                   # Build firmware
+pio run -t upload         # Upload to Arduino
+pio device monitor        # Monitor serial output
+</code></pre>
+
+<h3>2. Initial Configuration</h3>
+
+<pre><code>CLI                       # Enter CLI mode (type at serial monitor)
+set hostname mymodbus     # Set CLI prompt
+set slaveid 1             # Set Modbus slave ID
+set baudrate 9600         # Set RS-485 baudrate
+save                      # Save to EEPROM
+</code></pre>
+
+<h3>3. Configure Counter with Frequency Measurement</h3>
+
+<h4>Hardware Mode (Recommended)</h4>
+
+<pre><code>; Counter 1 on Timer1 (pin 5) – Direct hardware input
+set counter 1 mode 1 parameter \
+  hw-mode:hw-t1 \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:100 \
+  raw-reg:104 \
+  freq-reg:108 \
+  ctrl-reg:130 \
+  input-dis:125 \
+  direction:up \
+  scale:1.0
+
+; Enable auto-start
+set counter 1 start enable
+
+; Save configuration
+save
+
+; View status
+show counters
+; pin column shows: 5 (hardware GPIO pin)
+; hz column updates every second
+</code></pre>
+
+<h4>Software Mode (GPIO-Based)</h4>
+
+<pre><code>; Counter 2 on GPIO pin 22 – Software mode
+set counter 2 mode 1 parameter \
+  hw-mode:sw \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:110 \
+  raw-reg:114 \
+  freq-reg:118 \
+  ctrl-reg:131 \
+  input-dis:20 \
+  direction:up \
+  scale:2.5 \
+  debounce:on \
+  debounce-ms:50
+
+; Map GPIO pin 22 to discrete input 20
+gpio map 22 input 20
+
+; Enable auto-start
+set counter 2 start enable
+
+; Save
+save
+</code></pre>
+
+<hr>
+
+<h2 id="counter">Counter Engine v4 (HW/SW Modes)</h2>
+
+<h3>Overview</h3>
+
+<p>Counter Engine v4 er et hybrid-system som understøtter både hardware og software counting modes:</p>
+
+<ul>
+  <li><strong>Hardware Mode (HW):</strong> Direkte timer input capture fra hardware timere T1/T3/T4/T5</li>
+  <li><strong>Software Mode (SW):</strong> GPIO pin-baseret edge detection med software filtering</li>
+</ul>
+
+<h3>Hardware Mode (HW)</h3>
+
+<h4>Fordele</h4>
+
+<ul>
+  <li>✅ <strong>Direkte Hardware Input</strong> – Bruger Arduino timer input capture pins (ICP1, ICP3, ICP4, ICP5)</li>
+  <li>✅ <strong>Ingen Software Overhead</strong> – Hardware tæller edges uafhængigt</li>
+  <li>✅ <strong>Præcis Frekvens Måling</strong> – Stabil frekvens måling selv under Modbus trafik</li>
+  <li>✅ <strong>Bedst for Høj-Frekvens</strong> – Ideal til 1-20 kHz signaler</li>
+</ul>
+
+<h4>Timer Selection</h4>
+
+<table>
+<thead><tr><th>Timer</th><th>GPIO Pin</th><th>Use Case</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td>T1</td><td>5</td><td>Frequency input</td><td>Recommended for precision</td></tr>
+<tr><td>T3</td><td>47</td><td>High-speed counting</td><td>Parallel operation possible</td></tr>
+<tr><td>T4</td><td>6</td><td>Frequency measurement</td><td>Additional independent channel</td></tr>
+<tr><td>T5</td><td>46</td><td>General input capture</td><td>4th independent counter</td></tr>
+</tbody>
+</table>
+
+<h4>Configuration Example</h4>
+
+<pre><code>; Counter 1 on Timer1 (pin 5)
+set counter 1 mode 1 parameter \
+  hw-mode:hw-t1 \
+  count-on:rising res:32 prescaler:1 \
+  index-reg:100 raw-reg:104 freq-reg:108 \
+  ctrl-reg:130 input-dis:125 direction:up scale:1.0
+
+; Counter 3 on Timer4 (pin 6) – Independent
+set counter 3 mode 1 parameter \
+  hw-mode:hw-t4 \
+  count-on:both res:32 prescaler:1 \
+  index-reg:120 raw-reg:124 freq-reg:128 \
+  ctrl-reg:132 input-dis:126 direction:up scale:1.0
+</code></pre>
+
+<h4>GPIO Mapping (HW Mode)</h4>
+
+<p>Hardware counters automatisk skaber <strong>DYNAMIC GPIO mappings</strong> som ses i <code>show config</code>:</p>
+
+<pre><code>GPIO Mappings:
+  gpio 5 DYNAMIC at input 125 (counter1 HW-T1)
+  gpio 47 DYNAMIC at input 126 (counter2 HW-T3)
+  gpio 6 DYNAMIC at input 127 (counter3 HW-T4)
+  gpio 46 DYNAMIC at input 128 (counter4 HW-T5)
+</code></pre>
+
+<ul>
+  <li>✅ Mappings er <strong>read-only</strong> (bestemt af hardware)</li>
+  <li>✅ Vises i GPIO section af <code>show config</code></li>
+  <li>✅ Automatisk håndteret – ingen manuel konfiguration nødvendig</li>
+  <li>❌ Kan <strong>ikke</strong> manuelt overskrives</li>
+</ul>
+
+<h3>Software Mode (SW)</h3>
+
+<h4>Fordele</h4>
+
+<ul>
+  <li>✅ <strong>Flexibel GPIO:</strong> Brug hvilken som helst digital pin (2-53 undtagen reserverede)</li>
+  <li>✅ <strong>Debounce Filtering:</strong> Built-in noise filtering (1-255 ms)</li>
+  <li>✅ <strong>Variable Mapping:</strong> Skift GPIO pins via <code>gpio map</code> kommando</li>
+  <li>✅ <strong>Suited for Slow Signals:</strong> Perfekt for lav-frekvens inputs</li>
+</ul>
+
+<h4>Begrænsninger</h4>
+
+<ul>
+  <li>❌ <strong>Mindre Præcis:</strong> Software-baseret edge detection har jitter</li>
+  <li>❌ <strong>Lavere Max Frekvens:</strong> ~5 kHz maksimum (software-begrænset)</li>
+  <li>❌ <strong>Kræver GPIO Mapping:</strong> Skal manuelt mappes via <code>gpio map</code></li>
+</ul>
+
+<h4>Configuration Example</h4>
+
+<pre><code>; Counter 2 on GPIO pin 22 – Software mode
+set counter 2 mode 1 parameter \
+  hw-mode:sw \
+  count-on:rising \
+  res:32 \
+  prescaler:1 \
+  index-reg:110 \
+  raw-reg:114 \
+  freq-reg:118 \
+  ctrl-reg:131 \
+  input-dis:20 \
+  direction:up \
+  scale:2.5 \
+  debounce:on \
+  debounce-ms:50
+
+; Map GPIO pin 22 to discrete input 20
+gpio map 22 input 20
+
+; View mapping
+show gpio
+; Output: gpio 22 at input 20
+</code></pre>
+
+<h3>Counter Parameters</h3>
+
+<h4>Mode Selection</h4>
+
+<pre><code>hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5>
+</code></pre>
+
+<table>
+<thead><tr><th>Value</th><th>Mode</th><th>GPIO Pin</th><th>Use</th></tr></thead>
+<tbody>
+<tr><td><code>sw</code></td><td>Software</td><td>User-selectable</td><td>GPIO-based counting</td></tr>
+<tr><td><code>hw-t1</code></td><td>Hardware T1</td><td>5 (ICP1)</td><td>Frequency input</td></tr>
+<tr><td><code>hw-t3</code></td><td>Hardware T3</td><td>47 (ICP3)</td><td>Independent counting</td></tr>
+<tr><td><code>hw-t4</code></td><td>Hardware T4</td><td>6 (ICP4)</td><td>Parallel measurement</td></tr>
+<tr><td><code>hw-t5</code></td><td>Hardware T5</td><td>46 (ICP5)</td><td>Additional input</td></tr>
+</tbody>
+</table>
+
+<h4>Edge Detection</h4>
+
+<pre><code>count-on:<rising|falling|both>
+</code></pre>
+
+<ul>
+  <li><code>rising</code> – Tæl stignede kanter (low→high)</li>
+  <li><code>falling</code> – Tæl faldende kanter (high→low)</li>
+  <li><code>both</code> – Tæl alle kanter (begge retninger)</li>
+</ul>
+
+<h4>Resolution (Bit Width)</h4>
+
+<pre><code>res:<8|16|32|64>
+</code></pre>
+
+<table>
+<thead><tr><th>Value</th><th>Range</th><th>Auto-Reset At</th></tr></thead>
+<tbody>
+<tr><td>8</td><td>0–255</td><td>256</td></tr>
+<tr><td>16</td><td>0–65535</td><td>65536</td></tr>
+<tr><td>32</td><td>0–4,294,967,295</td><td>4,294,967,296 (mest brugt)</td></tr>
+<tr><td>64</td><td>0–18,446,744,073,709,551,615</td><td>Meget stort tal</td></tr>
+</tbody>
+</table>
+
+<h4>Prescaler</h4>
+
+<pre><code>prescaler:<1-256>
+</code></pre>
+
+<ul>
+  <li><code>1</code> – Tæl hver kant (ingen division)</li>
+  <li><code>2</code> – Tæl hver 2. kant</li>
+  <li><code>4</code> – Tæl hver 4. kant</li>
+  <li><code>256</code> – Tæl hver 256. kant</li>
+</ul>
+
+<div class="note">
+<b>Frekvens med Prescaler:</b><br>
+<code>Hz = (raw_edges / prescaler) / time_window_seconds</code>
+</div>
+
+<h4>Frequency Measurement</h4>
+
+<p>Frekvensen måles automatisk og opdateres i <code>freq-reg</code> hvert sekund:</p>
+
+<ul>
+  <li><strong>Måle-vindue:</strong> 1-2 sekunders window</li>
+  <li><strong>Delta validering:</strong> Max 100 kHz accepteres (højere = afvist)</li>
+  <li><strong>Overflow detection:</strong> Håndterer counter bit-width wrap-around</li>
+  <li><strong>Range:</strong> 0-20000 Hz (clamped)</li>
+  <li><strong>Stabilitet:</strong> Immune over for Modbus read trafik</li>
+  <li><strong>Auto-reset:</strong> Ved counter reset, overflow, eller 5-sec timeout</li>
+</ul>
+
+<h3>Control Register (ctrlReg)</h3>
+
+<p>Control register er et Modbus holding register med bit-level kontrol:</p>
+
+<table>
+<thead><tr><th>Bit</th><th>Navn</th><th>Funktion</th><th>Mode</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Reset</td><td>Sæt til 1 for at nulstille counter til start-value</td><td>W</td></tr>
+<tr><td>1</td><td>Start</td><td>Sæt til 1 for at enable counter (start counting)</td><td>W</td></tr>
+<tr><td>2</td><td>Stop</td><td>Sæt til 1 for at disable counter (stop counting)</td><td>W</td></tr>
+<tr><td>3</td><td>Reset-on-Read</td><td>Auto-reset efter Modbus read (persistent)</td><td>R/W</td></tr>
+<tr><td>4-15</td><td>Reserved</td><td>Not used</td><td>-</td></tr>
+</tbody>
+</table>
+
+<h4>Control Examples</h4>
+
+<pre><code>; Read control register
+read reg 130
+
+; Reset counter via Modbus FC06
+write reg 130 1
+
+; Stop counter
+write reg 130 4
+
+; Start counter
+write reg 130 2
+
+; Enable reset-on-read
+write reg 130 8
+
+; Reset + Auto-start
+write reg 130 3
+</code></pre>
+
+<hr>
+
+<h2 id="timer">Timer Engine v2</h2>
+
+<h3>Overview</h3>
+
+<p><strong>TimerEngine v2</strong> styrer coils ud fra tidsintervaller. Systemet har 4 timere (ID 1–4), hver med sin egen mode og parametre.</p>
+
+<h3>Timer Modes</h3>
+
+<table>
+<thead><tr><th>Mode</th><th>Navn</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>One-shot</td><td>Kører én sekvens: P1 i T1, P2 i T2, P3 i T3, derefter stopper</td></tr>
+<tr><td>2</td><td>Monostable</td><td>Monostabil: trigger starter puls af længde T1. Ny trigger forlænger tiden</td></tr>
+<tr><td>3</td><td>Astable</td><td>Astabil "blink": ON i T1, OFF i T2, gentagelse kontinuerligt</td></tr>
+<tr><td>4</td><td>Input-triggered</td><td>Trigges af digitalt input edge. Hver edge starter sekvens på coil</td></tr>
+</tbody>
+</table>
+
+<h3>Mode 1: One-shot (3-Phase)</h3>
+
+<pre><code>set timer 1 mode 1 parameter \
+  coil:10 P1:high P2:low P3:low T1:1000 T2:500 T3:0
+</code></pre>
+
+<p>Sekvens: HIGH 1000ms → LOW 500ms → END</p>
+
+<h3>Mode 3: Astable (Blink)</h3>
+
+<pre><code>set timer 2 mode 3 parameter \
+  coil:11 P1:high P2:low T1:500 T2:500
+</code></pre>
+
+<p>Sekvens: HIGH 500ms → LOW 500ms → Gentagelse (1 Hz toggle)</p>
+
+<h3>Mode 4: Input-triggered</h3>
+
+<pre><code>; Single-phase pulse (sub=0)
+set timer 4 mode 4 parameter \
+  coil:15 P1:high P2:low T1:200 \
+  trigger:12 edge:rising sub:0
+
+; Two-phase sequence (sub=1)
+set timer 4 mode 4 parameter \
+  coil:16 P1:high P2:low T1:200 T2:300 \
+  trigger:13 edge:falling sub:1
+</code></pre>
+
+<ul>
+  <li><strong>sub=0:</strong> Single-phase pulse – Retrigger efter T1</li>
+  <li><strong>sub=1:</strong> Two-phase sequence – Retrigger efter T1+T2</li>
+</ul>
+
+<hr>
+
+<h2 id="gpio">GPIO Management</h2>
+
+<h3>Hardware Counter GPIO (DYNAMIC)</h3>
+
+<p>Hardware counters automatisk mapper GPIO pins (read-only, DYNAMIC):</p>
+
+<pre><code>show config
+
+; Output:
+; GPIO Mappings:
+;   gpio 5 DYNAMIC at input 125 (counter1 HW-T1)
+;   gpio 47 DYNAMIC at input 126 (counter2 HW-T3)
+</code></pre>
+
+<p>Disse mappings:</p>
+
+<ul>
+  <li>✅ <strong>Kan ikke ændres</strong> (hardware-bestemt)</li>
+  <li>✅ <strong>Vises som DYNAMIC</strong> i konfiguration</li>
+  <li>✅ <strong>Vises i GPIO section</strong> af show config</li>
+  <li>✅ <strong>Synlig i show counters</strong> pin kolonne</li>
+</ul>
+
+<h3>Manual GPIO Mapping</h3>
+
+<h4>Syntax</h4>
+
+<pre><code>; Map GPIO pin to discrete input (for SW counters)
+gpio map <pin> input <index>
+
+; Map GPIO pin to coil (output)
+gpio map <pin> coil <index>
+
+; Remove mapping
+gpio unmap <pin>
+
+; View all mappings
+show gpio
+</code></pre>
+
+<h4>Examples</h4>
+
+<pre><code>; Map GPIO pin 22 to discrete input 20 (SW counter)
+gpio map 22 input 20
+
+; Map GPIO pin 30 to coil 10 (output)
+gpio map 30 coil 10
+
+; Unmap pin
+gpio unmap 22
+
+; View all
+show gpio
+
+; Output:
+; GPIO Mappings:
+;   gpio 22 at input 20
+;   gpio 30 at coil 10
+;   gpio 5 DYNAMIC at input 125 (counter1 HW-T1)
+</code></pre>
+
+<h3>Rules and Constraints</h3>
+
+<ul>
+  <li><strong>One mapping per pin:</strong> Pin 22 kan kun mappe til ét input eller coil</li>
+  <li><strong>DYNAMIC mappings read-only:</strong> Kan ikke manuelt overskrives</li>
+  <li><strong>Input/Coil distinction:</strong> Pin til input kan ikke også være til coil</li>
+  <li><strong>Persistence:</strong> Alle mappings gemt i EEPROM (persistent over reboot)</li>
+  <li><strong>Reserved pins:</strong> Kan ikke brugen 0, 1, 8, 13, 18, 19, og HW pins (5, 47, 6, 46) hvis brugt i HW mode</li>
+</ul>
+
+<hr>
+
+<h2 id="cliref">CLI Command Reference</h2>
+
+<h3>System Commands</h3>
+
+<table>
+<thead><tr><th>Command</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>show config</code></td><td>Display complete configuration (registers, coils, timers, counters, GPIO)</td></tr>
+<tr><td><code>show version</code></td><td>Show firmware version and build info</td></tr>
+<tr><td><code>set hostname <name></code></td><td>Set CLI prompt hostname (max 15 chars)</td></tr>
+<tr><td><code>set slaveid <id></code></td><td>Set Modbus slave ID (1-247, 0=broadcast)</td></tr>
+<tr><td><code>set baudrate <baud></code></td><td>Set Modbus RTU baudrate (9600, 19200, 38400, 57600, 115200)</td></tr>
+<tr><td><code>save</code></td><td>Save configuration to EEPROM</td></tr>
+<tr><td><code>load</code></td><td>Load configuration from EEPROM</td></tr>
+<tr><td><code>defaults</code></td><td>Reset to factory defaults</td></tr>
+<tr><td><code>reboot</code></td><td>Restart microcontroller</td></tr>
+</tbody>
+</table>
+
+<h3>Counter Commands</h3>
+
+<table>
+<thead><tr><th>Command</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>show counters</code></td><td>Display all counter status with frequency</td></tr>
+<tr><td><code>set counter <id> mode 1 parameter ...</code></td><td>Configure counter with all parameters</td></tr>
+<tr><td><code>set counter <id> start ENABLE|DISABLE</code></td><td>Enable/disable auto-start on boot</td></tr>
+<tr><td><code>set counter <id> reset-on-read ENABLE|DISABLE</code></td><td>Enable/disable auto-reset on Modbus read</td></tr>
+<tr><td><code>reset counter <id></code></td><td>Manually reset counter to start-value</td></tr>
+<tr><td><code>clear counters</code></td><td>Reset all counters to start-value</td></tr>
+<tr><td><code>no set counter <id></code></td><td>Remove/disable counter configuration</td></tr>
+</tbody>
+</table>
+
+<h4>Counter Parameter Syntax</h4>
+
+<pre><code>set counter <id> mode 1 parameter \
+  hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5> \
+  count-on:<rising|falling|both> \
+  start-value:<n> \
+  res:<8|16|32|64> \
+  prescaler:<1-256> \
+  index-reg:<0-159> \
+  raw-reg:<0-159> \
+  freq-reg:<0-159> \
+  overload-reg:<0-159> \
+  ctrl-reg:<0-159> \
+  input-dis:<0-NUM_DISCRETE> \
+  direction:<up|down> \
+  scale:<float> \
+  debounce:<on|off> \
+  debounce-ms:<1-255>
+</code></pre>
+
+<h3>Timer Commands</h3>
+
+<table>
+<thead><tr><th>Command</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>show timers</code></td><td>Display all timer status</td></tr>
+<tr><td><code>set timer <id> mode <mode> parameter ...</code></td><td>Configure timer (1-4 modes)</td></tr>
+<tr><td><code>set timers status-reg:<n> control-reg:<n></code></td><td>Configure global timer registers</td></tr>
+<tr><td><code>no set timer <id></code></td><td>Remove/disable timer configuration</td></tr>
+</tbody>
+</table>
+
+<h3>GPIO Commands</h3>
+
+<table>
+<thead><tr><th>Command</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>gpio map <pin> input <idx></code></td><td>Map GPIO pin to discrete input</td></tr>
+<tr><td><code>gpio map <pin> coil <idx></code></td><td>Map GPIO pin to coil</td></tr>
+<tr><td><code>gpio unmap <pin></code></td><td>Remove GPIO mapping</td></tr>
+<tr><td><code>show gpio</code></td><td>Display all GPIO mappings (manual + DYNAMIC)</td></tr>
+</tbody>
+</table>
+
+<h3>Modbus Commands</h3>
+
+<table>
+<thead><tr><th>Command</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>show regs [start] [count]</code></td><td>Display holding registers</td></tr>
+<tr><td><code>show inputs</code></td><td>Display input registers</td></tr>
+<tr><td><code>show coils</code></td><td>Display coil states</td></tr>
+<tr><td><code>write reg <addr> <value></code></td><td>Write holding register (Modbus FC06)</td></tr>
+<tr><td><code>write coil <idx> <0|1></code></td><td>Write coil state</td></tr>
+<tr><td><code>read reg <addr></code></td><td>Read holding register value</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2 id="examples">Practical Examples</h2>
+
+<h3>Example 1: Frequency Measurement (HW Mode)</h3>
+
+<p><strong>Scenario:</strong> Measure 1 kHz signal using Timer1 (pin 5)</p>
+
+<pre><code>CLI
+
+; Configure counter 1 on Timer1
+set counter 1 mode 1 parameter \
+  hw-mode:hw-t1 \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:100 \
+  raw-reg:104 \
+  freq-reg:108 \
+  ctrl-reg:130 \
+  input-dis:125 \
+  direction:up \
+  scale:1.0
+
+; Enable auto-start
+set counter 1 start enable
+
+; View configuration
+show config
+; GPIO Mappings:
+;   gpio 5 DYNAMIC at input 125 (counter1 HW-T1)
+
+; Save
+save
+
+; View status
+show counters
+; pin column: 5
+; hz column: updates every second
+</code></pre>
+
+<h3>Example 2: Software Counter with Debounce</h3>
+
+<p><strong>Scenario:</strong> Count pulses on GPIO pin 22 with debounce filtering</p>
+
+<pre><code>; Configure counter 2 in SOFTWARE mode
+set counter 2 mode 1 parameter \
+  hw-mode:sw \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:110 \
+  raw-reg:114 \
+  freq-reg:118 \
+  ctrl-reg:131 \
+  input-dis:20 \
+  direction:up \
+  scale:1.0 \
+  debounce:on \
+  debounce-ms:50
+
+; Map GPIO pin 22 to discrete input 20
+gpio map 22 input 20
+
+; Enable auto-start
+set counter 2 start enable
+
+; Save
+save
+
+; View configuration
+show config
+; GPIO section: gpio 22 at input 20
+
+; View status
+show counters
+; pin column: 22 (user-selected GPIO)
+</code></pre>
+
+<h3>Example 3: Multi-Counter Setup (Mixed HW/SW)</h3>
+
+<p><strong>Scenario:</strong> 4 counters with different modes</p>
+
+<pre><code>; Counter 1: Hardware (Timer1, pin 5)
+set counter 1 mode 1 parameter \
+  hw-mode:hw-t1 count-on:rising res:32 \
+  prescaler:1 index-reg:100 raw-reg:104 freq-reg:108 \
+  ctrl-reg:130 input-dis:125 direction:up scale:1.0
+
+; Counter 2: Hardware (Timer3, pin 47)
+set counter 2 mode 1 parameter \
+  hw-mode:hw-t3 count-on:rising res:32 \
+  prescaler:1 index-reg:110 raw-reg:114 freq-reg:118 \
+  ctrl-reg:131 input-dis:126 direction:up scale:1.0
+
+; Counter 3: Software (GPIO 22)
+set counter 3 mode 1 parameter \
+  hw-mode:sw count-on:rising res:32 \
+  prescaler:1 index-reg:120 raw-reg:124 freq-reg:128 \
+  ctrl-reg:132 input-dis:20 direction:up scale:2.5 \
+  debounce:on debounce-ms:50
+
+; Counter 4: Software (GPIO 23) with prescaler
+set counter 4 mode 1 parameter \
+  hw-mode:sw count-on:rising res:32 \
+  prescaler:4 index-reg:130 raw-reg:134 freq-reg:138 \
+  ctrl-reg:133 input-dis:21 direction:up scale:0.1 \
+  debounce:on debounce-ms:30
+
+; GPIO mappings
+gpio map 22 input 20
+gpio map 23 input 21
+
+; Auto-start all
+set counter 1 start enable
+set counter 2 start enable
+set counter 3 start enable
+set counter 4 start enable
+
+; Save
+save
+
+; View complete configuration
+show config
+show counters
+</code></pre>
+
+<hr>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3>Issue: Counters not counting (HW mode)</h3>
+
+<p><strong>Symptom:</strong> Counter value stays 0, frequency shows 0 Hz</p>
+
+<p><strong>Solutions:</strong></p>
+
+<pre><code>; Check configuration
+show config
+
+; Check status
+show counters
+
+; Check if counter started
+read reg 130    ; ctrl-reg should show bit 1 set
+
+; Manually start if needed
+write reg 130 2 ; Set bit 1 (start)
+
+; Reset counter
+write reg 130 1 ; Set bit 0 (reset)
+
+; Monitor for changes
+show counters   ; Repeat every second
+</code></pre>
+
+<h3>Issue: Counters not counting (SW mode)</h3>
+
+<p><strong>Symptom:</strong> Software counter at 0, no increment even with GPIO input</p>
+
+<p><strong>Solutions:</strong></p>
+
+<pre><code>; Verify GPIO mapping
+show gpio
+
+; Verify counter configuration
+show config
+
+; Check debounce setting (may be too aggressive)
+set counter 2 mode 1 parameter \
+  hw-mode:sw ... debounce:on debounce-ms:10
+
+; Manually check GPIO state
+show inputs
+
+; Manually start counter
+write reg 131 2 ; ctrl-reg bit 1
+
+; Monitor
+show counters
+</code></pre>
+
+<h3>Issue: SAVE command failed or caused reboot</h3>
+
+<p><strong>Symptom:</strong> System restarts when executing <code>save</code></p>
+
+<p><strong>Cause:</strong> Stack overflow (fixed in v3.3.0 with global config allocation)</p>
+
+<p><strong>Solutions:</strong></p>
+
+<pre><code>; Reset to factory defaults
+defaults
+
+; Save defaults
+save
+
+; If persistent failures:
+load
+
+; If EEPROM corrupted:
+defaults
+save
+
+; Reconfigure via CLI
+</code></pre>
+
+<h3>Issue: Timer not executing</h3>
+
+<p><strong>Symptom:</strong> Timer shows enabled but no action (coil unchanged)</p>
+
+<pre><code>; Check timer status
+show timers
+
+; Check control register
+read reg 141    ; Global timer control
+
+; Manually start timer
+write reg 141 1
+
+; For input-triggered timers (mode 4):
+; Verify trigger discrete input has edge
+show inputs
+
+; Reconfigure timer
+set timer 1 mode 3 parameter \
+  coil:10 P1:high P2:low T1:500 T2:500
+
+set timers status-reg:140 control-reg:141
+
+set timer 1 start
+
+show timers
+</code></pre>
+
+<hr>
+
+<h2 id="versions">Version History</h2>
+
+<h3>v3.3.0 (2025-11-11) – Hardware Counter Engine with HW/SW Selection</h3>
+
+<p><strong>NEW Features:</strong></p>
+
+<ul>
+  <li>✨ <strong>Hybrid HW/SW Counter Engine (CounterEngine v4)</strong>
+    <ul>
+      <li>Hardware Mode: Direct timer input (T1/T3/T4/T5 on pins 5/47/6/46)</li>
+      <li>Software Mode: GPIO pin-based edge detection</li>
+      <li>Explicit timer selection via <code>hw-mode</code> parameter</li>
+      <li>Automatic GPIO mapping (DYNAMIC) for HW mode</li>
+    </ul>
+  </li>
+  <li>✨ <strong>Improved CLI Configuration Display</strong>
+    <ul>
+      <li>Separate discrete input (input-dis) vs GPIO pin display</li>
+      <li>DYNAMIC GPIO mappings in GPIO section</li>
+      <li>Corrected pin column in <code>show counters</code> (actual GPIO pins)</li>
+    </ul>
+  </li>
+  <li>✅ <strong>Fixed SAVE Command</strong> – Global config allocation prevents stack overflow</li>
+  <li>📊 <strong>EEPROM schema updated to v10</strong> (added hwMode field to CounterConfig)</li>
+  <li>🔧 <strong>CLI parser</strong>: <code>hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5></code> parameter</li>
+  <li>🎯 <strong>Backward compatible</strong> with v3.2.0 configurations</li>
+</ul>
+
+<p><strong>Performance:</strong></p>
+
+<ul>
+  <li>RAM: 82.4% (6751 / 8192 bytes)</li>
+  <li>Flash: 21.2% (53956 / 253952 bytes)</li>
+</ul>
+
+<h3>v3.2.0 (2025-11-10) – Frequency Measurement</h3>
+
+<p><strong>NEW Features:</strong></p>
+
+<ul>
+  <li>✨ <strong>Frequency Measurement</strong>: Automatic Hz measurement (0-20000 Hz)</li>
+  <li>✨ <strong>Raw Register</strong>: Separate unscaled value register</li>
+  <li>✨ <strong>Consistent Naming</strong>: Updated parameter names (index-reg, raw-reg, freq-reg)</li>
+  <li>✨ <strong>CLI Enhancements</strong>: 256-char command buffer, improved help</li>
+</ul>
+
+<h3>v3.1.9 (2025-11-09) – Counter Control</h3>
+
+<ul>
+  <li>Individual reset-on-read enable per counter</li>
+  <li>Individual auto-start enable per counter</li>
+  <li>Improved counter display</li>
+</ul>
+
+<hr>
+
+<h3>Support and Resources</h3>
+
+<div class="quickref">
+<b>Quick Links</b>
+<ul>
+  <li><strong>CLI Entry:</strong> Type <code>CLI</code> at serial monitor (115200 baud)</li>
+  <li><strong>Help System:</strong> Type <code>?</code> or <code>help</code> in CLI</li>
+  <li><strong>Configuration:</strong> <code>show config</code> displays complete system state</li>
+  <li><strong>Counter Status:</strong> <code>show counters</code> shows all counters with frequency</li>
+  <li><strong>Important:</strong> Always <code>save</code> before <code>reboot</code></li>
+</ul>
+</div>
+
+<hr>
+
+<p style="text-align:center; margin-top:2rem; color:#666; font-size:0.9rem;">
+  <strong>Modbus RTU Server v3.3.0</strong><br>
+  Arduino Mega 2560 – Hardware/Software Counter Engine<br>
+  Build: 2025-11-11 | Status: Production Ready ✅
+</p>
+
+</body>
+</html>

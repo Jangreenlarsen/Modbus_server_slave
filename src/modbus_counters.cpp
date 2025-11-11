@@ -1,26 +1,27 @@
 // ============================================================================
 //  Filnavn : modbus_counters.cpp
 //  Projekt  : Modbus RTU Server / CLI
-//  Version  : v3.1.4-patch3 (2025-11-05)
+//  Version  : v3.3.0 (2025-11-11)
 //  Forfatter: JanG at modbus_slave@laces.dk
-//  Formål   : CounterEngine v3 med 4 uafhængige input-tællere.
-//             - Edge-detektering (rising/falling/both)
-//             - Prescaler
+//  Formål   : CounterEngine v4 med 4 uafhængige input-tællere (hybrid HW/SW).
+//             - HW mode: Interrupt-baseret ved hardware timer (Timer1/3/4/5)
+//             - SW mode: Software polling med edge-detektering
+//             - Prescaler (SW) eller prescale/external clock (HW)
 //             - Op/ned-tælling (direction)
 //             - BitWidth-maskning (8/16/32/64)
 //             - Overflow/auto-reset til startValue
 //             - Soft-control via controlReg (bit0=reset,1=start,2=stop)
 //             - Skaleret udlæsning til holdingRegs med float scale
-//             - Debounce pr. kanal (debounceEnable/debounceTimeMs)
-//             - Debug/oversigtsprint via counters_print_status() til CLI.
+//             - Debounce pr. kanal (SW mode)
 //  Ændringer:
-//    - v3.1.4-patch3: Tilføjet counters_print_status() til tabulær visning
-//                     (show counters) og support for "no set counter" i CLI.
-//    - v3.1.4-patch2: Tilføjet debounceEnable/debounceTimeMs/lastEdgeMs til
-//                     CounterConfig + runtime-debounce i counters_loop().
+//    - v3.3.0: Hybrid HW/SW counter engine
+//              HW mode: interrupt-driven, deterministic frequency
+//              SW mode: legacy polling-based
+//    - v3.2.0: Frequency measurement, raw register, consistent naming
 // ============================================================================
 
 #include "modbus_counters.h"
+#include "modbus_counters_hw.h"
 #include "modbus_core.h"
 #include <string.h>
 #include <math.h>
@@ -170,6 +171,20 @@ static void handle_control(CounterConfig& c) {
       holdingRegs[c.freqReg] = 0;
     }
 
+    // Reset HW timer if in HW mode
+    if (c.hwMode != 0) {
+      // Map hwMode to hw_counter_id
+      uint8_t hw_id = 0;
+      if (c.hwMode == 1) hw_id = 1;       // Timer1
+      else if (c.hwMode == 3) hw_id = 2;  // Timer3
+      else if (c.hwMode == 4) hw_id = 3;  // Timer4
+      else if (c.hwMode == 5) hw_id = 4;  // Timer5
+
+      if (hw_id != 0) {
+        hw_counter_reset(hw_id);
+      }
+    }
+
     if (c.overflowReg < NUM_REGS) holdingRegs[c.overflowReg] = 0;
 
     newVal &= ~0x0001;
@@ -213,14 +228,15 @@ void counters_init() {
     memset(&c, 0, sizeof(CounterConfig));
     c.id        = i + 1;
     c.enabled   = 0;
+    c.hwMode    = 0;           // Default: SW mode (NEW v3.3.0)
     c.edgeMode  = CNT_EDGE_RISING;
     c.direction = CNT_DIR_UP;
     c.bitWidth  = 32;
     c.prescaler = 1;
     c.inputIndex    = 0;
     c.regIndex      = 0;
-    c.rawReg        = 0;        // NEW
-    c.freqReg       = 0;        // NEW
+    c.rawReg        = 0;
+    c.freqReg       = 0;
     c.controlReg    = 0;
     c.overflowReg   = 0;
     c.startValue    = 0;
@@ -239,9 +255,9 @@ void counters_init() {
     c.lastEdgeMs     = 0;
 
     // Frekvens-måling defaults
-    c.lastCountForFreq = 0;     // NEW
-    c.lastFreqCalcMs   = 0;     // NEW
-    c.currentFreqHz    = 0;     // NEW
+    c.lastCountForFreq = 0;
+    c.lastFreqCalcMs   = 0;
+    c.currentFreqHz    = 0;
   }
 }
 
@@ -250,7 +266,7 @@ void counters_loop() {
     CounterConfig& c = counters[idx];
 
     if (!c.enabled) {
-      // alligevel spejl overflowFlag og evt. ud-værdi
+      // Reflect overflow flag and value even when disabled
       if (c.overflowReg < NUM_REGS) {
         holdingRegs[c.overflowReg] = c.overflowFlag ? 1 : 0;
       }
@@ -258,24 +274,72 @@ void counters_loop() {
       continue;
     }
 
-    // Håndter controlReg-kommandoer
-    handle_control(c);
+    // ====================================================================
+    // HW MODE (v3.3.0): Interrupt-driven, deterministic
+    // ====================================================================
+    if (c.hwMode != 0) {
+      // Handle control register commands
+      handle_control(c);
 
-    // Hvis ikke running -> track lastLevel, men tælle ikke
-    bool lvl = di_read(c.inputIndex);
-    if (!c.running) {
-      c.lastLevel = lvl ? 1 : 0;
-      // Spejl overflowFlag kun hvis sat, og bevar det indtil reset-bit rydder det
-    if (c.overflowReg < NUM_REGS) {
-     if (c.overflowFlag)
-      holdingRegs[c.overflowReg] = 1;
+      if (!c.running) {
+        // Not running - just reflect status
+        if (c.overflowReg < NUM_REGS) {
+          holdingRegs[c.overflowReg] = c.overflowFlag ? 1 : 0;
+        }
+        store_value_to_regs(idx);
+        continue;
       }
 
+      // Map hwMode to hw_counter_id (hw_counter functions use 1=T1, 2=T3, 3=T4, 4=T5)
+      uint8_t hw_id = 0;
+      if (c.hwMode == 1) hw_id = 1;       // Timer1
+      else if (c.hwMode == 3) hw_id = 2;  // Timer3
+      else if (c.hwMode == 4) hw_id = 3;  // Timer4
+      else if (c.hwMode == 5) hw_id = 4;  // Timer5
+
+      if (hw_id == 0) {
+        // Invalid hwMode - skip this counter
+        continue;
+      }
+
+      // Read HW counter value and update SW representation
+      uint32_t hwValue = hw_counter_get_value(hw_id);
+      c.counterValue = (uint64_t)hwValue;  // Store for output scaling
+
+      // Update frequency measurement (interrupt-based, deterministic)
+      if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
+        hw_counter_update_frequency(c.freqReg, hw_id);
+      }
+
+      // Reflect outputs
+      if (c.overflowReg < NUM_REGS) {
+        holdingRegs[c.overflowReg] = c.overflowFlag ? 1 : 0;
+      }
       store_value_to_regs(idx);
       continue;
     }
 
-    // Edge-detektering
+    // ====================================================================
+    // SW MODE (v3.2.0): Software polling, legacy behavior
+    // ====================================================================
+
+    // Handle control register commands
+    handle_control(c);
+
+    // If not running -> track lastLevel, but don't count
+    bool lvl = di_read(c.inputIndex);
+    if (!c.running) {
+      c.lastLevel = lvl ? 1 : 0;
+      // Reflect overflow flag only if set, keep until reset-bit clears it
+      if (c.overflowReg < NUM_REGS) {
+        if (c.overflowFlag)
+          holdingRegs[c.overflowReg] = 1;
+      }
+      store_value_to_regs(idx);
+      continue;
+    }
+
+    // Edge-detection
     bool fire = false;
     uint8_t edge = sanitizeEdge(c.edgeMode);
     uint8_t last = c.lastLevel;
@@ -287,18 +351,18 @@ void counters_loop() {
 
     c.lastLevel = now;
 
-    // Debounce: hvis aktiveret, filtrér edges der kommer for tæt
+    // Debounce: if enabled, filter edges that come too fast
     if (fire && c.debounceEnable && c.debounceTimeMs > 0) {
       unsigned long nowMs = millis();
       unsigned long dt = nowMs - c.lastEdgeMs;
       if (dt < c.debounceTimeMs) {
-        // Ignorér denne edge som "støj"
+        // Ignore this edge as "noise"
         fire = false;
       } else {
         c.lastEdgeMs = nowMs;
       }
     } else if (fire && (!c.debounceEnable || c.debounceTimeMs == 0)) {
-      // Uden debounce: opdater blot lastEdgeMs til reference
+      // Without debounce: just update lastEdgeMs for reference
       c.lastEdgeMs = millis();
     }
 
@@ -322,7 +386,7 @@ void counters_loop() {
     }
     c.edgeCount = 0;
 
-    // Tælle-step
+    // Count step
     uint8_t bw = sanitizeBitWidth(c.bitWidth);
     uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
     bool overflow = false;
@@ -347,12 +411,12 @@ void counters_loop() {
       if (c.overflowReg < NUM_REGS) {
         holdingRegs[c.overflowReg] = 1;
       }
-      // Auto-reset til startValue (masket til bitWidth)
+      // Auto-reset to startValue (masked to bitWidth)
       uint64_t sv = c.startValue;
       sv = maskToBitWidth(sv, bw);
       c.counterValue = sv;
 
-      // Reset frequency tracking ved overflow
+      // Reset frequency tracking on overflow
       c.lastFreqCalcMs = 0;
       c.lastCountForFreq = 0;
       c.currentFreqHz = 0;
@@ -361,18 +425,18 @@ void counters_loop() {
       }
     }
 
-    // Spejl overflowFlag og skaleret værdi
+    // Reflect overflow flag and scaled value
     if (c.overflowReg < NUM_REGS) {
       holdingRegs[c.overflowReg] = c.overflowFlag ? 1 : 0;
     }
 
     store_value_to_regs(idx);
 
-    // Frekvens-beregning (hvert sekund)
+    // Frequency calculation (every second) - SW mode only
     if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
       unsigned long nowMs = millis();
 
-      // Initialiser første gang
+      // Initialize first time
       if (c.lastFreqCalcMs == 0) {
         c.lastFreqCalcMs = nowMs;
         c.lastCountForFreq = c.counterValue;
@@ -380,7 +444,7 @@ void counters_loop() {
         holdingRegs[c.freqReg] = 0;
       }
 
-      // Beregn frekvens hvert sekund (1000-2000 ms window for stability)
+      // Calculate frequency every second (1000-2000 ms window for stability)
       unsigned long deltaTimeMs = nowMs - c.lastFreqCalcMs;
       if (deltaTimeMs >= 1000 && deltaTimeMs <= 2000) {
         uint64_t deltaCount = 0;
@@ -394,37 +458,37 @@ void counters_loop() {
           uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
           deltaCount = (maxVal - c.lastCountForFreq) + c.counterValue + 1;
 
-          // Sanity check: hvis deltaCount er urimeligt stor, skip beregning
-          // (sandsynligvis counter reset eller timing fejl)
+          // Sanity check: if deltaCount is unreasonably large, skip calculation
+          // (probably counter reset or timing error)
           if (deltaCount > maxVal / 2) {
             validDelta = false;
           }
         }
 
-        // Beregn kun hvis deltaCount er reasonable (max 100kHz @ 1sec sample)
+        // Calculate only if deltaCount is reasonable (max 100kHz @ 1sec sample)
         if (validDelta && deltaCount <= 100000UL) {
-          // Beregn Hz: pulser per sekund
-          // Brug 32-bit for mellemresultat for at undgå overflow
+          // Calculate Hz: pulses per second
+          // Use 32-bit for intermediate result to avoid overflow
           uint32_t freqCalc = (uint32_t)((deltaCount * 1000UL) / deltaTimeMs);
 
-          // Clamp til reasonable range (0-20000 Hz)
+          // Clamp to reasonable range (0-20000 Hz)
           if (freqCalc > 20000UL) freqCalc = 20000UL;
 
           c.currentFreqHz = (uint16_t)freqCalc;
         } else {
-          // Invalid delta - behold sidste gyldige værdi
-          // (undgå at skrive garbage data)
+          // Invalid delta - keep last valid value
+          // (avoid writing garbage data)
         }
 
-        // Skriv til freqReg (atomic write for Modbus consistency)
+        // Write to freqReg (atomic write for Modbus consistency)
         holdingRegs[c.freqReg] = c.currentFreqHz;
 
-        // Opdater tracking
+        // Update tracking
         c.lastCountForFreq = c.counterValue;
         c.lastFreqCalcMs = nowMs;
       } else if (deltaTimeMs > 5000) {
-        // Hvis mere end 5 sekunder siden sidste update, reset tracking
-        // (undgå accumulation af fejl ved lange pauser)
+        // If more than 5 seconds since last update, reset tracking
+        // (avoid accumulation of errors on long pauses)
         c.lastFreqCalcMs = nowMs;
         c.lastCountForFreq = c.counterValue;
         c.currentFreqHz = 0;
@@ -482,7 +546,23 @@ c.lastEdgeMs = 0;
   c.lastLevel = di_read(c.inputIndex) ? 1 : 0;
 
   counters[idx] = c;
-  
+
+  // Initialize HW timer if in HW mode
+  if (c.enabled && c.hwMode != 0) {
+    // Map hwMode to hw_counter_id (hw_counter functions use 1=T1, 2=T3, 3=T4, 4=T5)
+    uint8_t hw_id = 0;
+    if (c.hwMode == 1) hw_id = 1;       // Timer1
+    else if (c.hwMode == 3) hw_id = 2;  // Timer3
+    else if (c.hwMode == 4) hw_id = 3;  // Timer4
+    else if (c.hwMode == 5) hw_id = 4;  // Timer5
+
+    if (hw_id != 0) {
+      // Initialize HW timer with prescaler mode
+      // prescaler field is used as mode for HW: 1=external clock, 2-5=internal prescale
+      hw_counter_init(hw_id, c.prescaler);
+    }
+  }
+
   // Nulstil overflowReg & skriv initial værdi
   if (c.overflowReg < NUM_REGS) {
     holdingRegs[c.overflowReg] = 0;
@@ -559,12 +639,13 @@ void counters_clear_all() {
 
 void counters_print_status() {
   Serial.println(F(""));
-  Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------"));
+  Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------------"));
   Serial.println(F("co = count-on, sv = startValue, res = resolution, ps = prescaler, ir = index-reg, rr = raw-reg, fr = freq-reg"));
   Serial.println(F("or = overload-reg, cr = ctrl-reg, dir = direction, sf = scaleFloat, dis = input-dis, d = debounce, dt = debounce-ms"));
-  Serial.println(F("hz = measured freq (Hz), value = scaled value, raw = raw counter value"));
-  Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------"));
-  Serial.println(F("counter | mode| co     | sv       | res | ps   | ir   | rr   | fr   | or   | cr   | dir   | sf     | dis | d   | dt   | hz    | value     | raw"));
+  Serial.println(F("hw = HW/SW mode (SW|T1|T3|T4|T5), pin = GPIO pin (actual hardware pin), hz = measured freq (Hz)"));
+  Serial.println(F("value = scaled value, raw = raw counter value"));
+  Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------------"));
+  Serial.println(F("counter | mode| hw  | pin  | co     | sv       | res | ps   | ir   | rr   | fr   | or   | cr   | dir   | sf     | d   | dt   | hz    | value     | raw"));
 
   char buf[32];
 
@@ -575,6 +656,13 @@ void counters_print_status() {
     const char* dirStr = (c.direction==CNT_DIR_DOWN)?"down":"up";
     const char* dStr = c.debounceEnable?"on":"off";
 
+    // HW mode display: SW, T1, T3, T4, T5
+    const char* hwStr = "SW";
+    if (c.hwMode == 1) hwStr = "T1";
+    else if (c.hwMode == 3) hwStr = "T3";
+    else if (c.hwMode == 4) hwStr = "T4";
+    else if (c.hwMode == 5) hwStr = "T5";
+
     // Vis skaleret og rå værdi separat
     unsigned long val  = (unsigned long)((double)c.counterValue * (double)c.scale);
     unsigned long raw  = (unsigned long)(c.counterValue & 0xFFFFFFFFULL);
@@ -583,6 +671,33 @@ void counters_print_status() {
     Serial.print(' ');
     sprintf(buf, "%-7d| ", i+1);       Serial.print(buf);
     sprintf(buf, "%-4d| ", mode);      Serial.print(buf);
+    sprintf(buf, "%-4s| ", hwStr);     Serial.print(buf);  // HW mode: SW|T1|T3|T4|T5
+
+    // Pin display: show actual GPIO pin
+    if (c.hwMode != 0) {
+      // HW mode: show GPIO pin based on timer
+      uint8_t gpioPin = 0;
+      if (c.hwMode == 1) gpioPin = 5;
+      else if (c.hwMode == 3) gpioPin = 47;
+      else if (c.hwMode == 4) gpioPin = 6;
+      else if (c.hwMode == 5) gpioPin = 46;
+      sprintf(buf, "%-5d| ", gpioPin);
+    } else {
+      // SW mode: find GPIO pin mapped to this discrete input
+      int16_t gpioPin = -1;
+      for (uint8_t pin = 0; pin < NUM_GPIO; pin++) {
+        if (gpioToInput[pin] == (int16_t)c.inputIndex) {
+          gpioPin = pin;
+          break;
+        }
+      }
+      if (gpioPin != -1) {
+        sprintf(buf, "%-5d| ", gpioPin);
+      } else {
+        sprintf(buf, "%-5s| ", "-");  // No GPIO mapping
+      }
+    }
+    Serial.print(buf);
     sprintf(buf, "%-7s| ", coStr);     Serial.print(buf);
     sprintf(buf, "%-9lu| ", (unsigned long)c.startValue); Serial.print(buf);
     sprintf(buf, "%-4d| ", c.bitWidth); Serial.print(buf);
@@ -601,7 +716,6 @@ void counters_print_status() {
     sprintf(buf, "%d.%03d  | ", scaleInt, scaleDec);
     Serial.print(buf);
 
-    sprintf(buf, "%-4d| ", c.inputIndex); Serial.print(buf);     // dis = input-dis
     sprintf(buf, "%-4s| ", dStr); Serial.print(buf);
     sprintf(buf, "%-5d| ", c.debounceTimeMs); Serial.print(buf);
     sprintf(buf, "%-6d| ", c.currentFreqHz); Serial.print(buf);  // hz = measured frequency

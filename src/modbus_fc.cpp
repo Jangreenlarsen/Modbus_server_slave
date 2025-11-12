@@ -332,7 +332,7 @@ void initModbus() {
   rs485_rx_enable();
   MODBUS_SERIAL.begin(currentBaudrate);
   frameGapUs = rtuGapUs();
-  Serial.print("RTU gap(us): "); Serial.println(frameGapUs);
+  Serial.print(F("RTU gap(us): ")); Serial.println(frameGapUs);
 
   // Init delsystemer
   timers_init();
@@ -344,19 +344,8 @@ void initModbus() {
     gpioToInput[p] = -1;
   }
 
-  // Forsøg at loade og anvende config – altid APPLY
-  PersistConfig cfg;
-  bool ok = configLoad(cfg);
-  if (!ok) {
-    Serial.println(F("EEPROM invalid or missing – loading defaults"));
-    configDefaults(cfg);
-  }
-  configApply(cfg);   // <-- altid apply, uanset returværdi
-
-  if (ok) Serial.println(F("OK: config loaded from EEPROM"));
-  else    Serial.println(F("Defaults applied (no valid EEPROM)"));
-
-  Serial.println(F("Modbus core initialized (CLEAN build)."));
+  // Config loading and apply is done in main.cpp setup() before calling initModbus()
+  // This avoids double-loading and prevents stack overflow from local PersistConfig
 }
 
 void modbusLoop() {

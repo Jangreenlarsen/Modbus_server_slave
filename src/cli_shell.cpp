@@ -2194,74 +2194,80 @@ void cli_loop() {
       continue;
     }
     if (escState == 2) {
-      escState = 0;
+      // Process arrow keys, reset state regardless
+      bool handled = false;
 
       // Arrow Up (ESC [ A)
       if (c == 'A') {
-        if (cmdHistoryCount == 0) continue;
-
-        // Save current line on first navigation
-        if (cmdHistoryNav == -1) {
-          strncpy(savedLine, line, sizeof(savedLine));
-          savedLine[sizeof(savedLine) - 1] = '\0';
-          cmdHistoryNav = 0;
-        } else if (cmdHistoryNav < cmdHistoryCount - 1) {
-          cmdHistoryNav++;
-        } else {
-          continue;  // Already at oldest command
-        }
-
-        const char* histCmd = getHistoryCmd(cmdHistoryNav);
-        if (histCmd) {
-          // Clear current line on terminal
-          while (idx > 0) {
-            Serial.write(8); Serial.write(' '); Serial.write(8);
-            idx--;
+        handled = true;
+        if (cmdHistoryCount > 0) {
+          // Save current line on first navigation
+          if (cmdHistoryNav == -1) {
+            strncpy(savedLine, line, sizeof(savedLine));
+            savedLine[sizeof(savedLine) - 1] = '\0';
+            cmdHistoryNav = 0;
+          } else if (cmdHistoryNav < cmdHistoryCount - 1) {
+            cmdHistoryNav++;
           }
-          // Copy and display history command
-          strncpy(line, histCmd, sizeof(line) - 1);
-          line[sizeof(line) - 1] = '\0';
-          idx = strlen(line);
-          Serial.print(line);
+
+          if (cmdHistoryNav >= 0 && cmdHistoryNav < cmdHistoryCount) {
+            const char* histCmd = getHistoryCmd(cmdHistoryNav);
+            if (histCmd) {
+              // Clear current line on terminal
+              while (idx > 0) {
+                Serial.write(8); Serial.write(' '); Serial.write(8);
+                idx--;
+              }
+              // Copy and display history command
+              strncpy(line, histCmd, sizeof(line) - 1);
+              line[sizeof(line) - 1] = '\0';
+              idx = strlen(line);
+              Serial.print(line);
+            }
+          }
         }
-        continue;
       }
 
       // Arrow Down (ESC [ B)
-      if (c == 'B') {
-        if (cmdHistoryNav <= -1) continue;  // Not navigating
-
-        if (cmdHistoryNav > 0) {
-          cmdHistoryNav--;
-          const char* histCmd = getHistoryCmd(cmdHistoryNav);
-          if (histCmd) {
-            // Clear current line on terminal
+      else if (c == 'B') {
+        handled = true;
+        if (cmdHistoryNav > -1) {  // Only if navigating
+          if (cmdHistoryNav > 0) {
+            cmdHistoryNav--;
+            const char* histCmd = getHistoryCmd(cmdHistoryNav);
+            if (histCmd) {
+              // Clear current line on terminal
+              while (idx > 0) {
+                Serial.write(8); Serial.write(' '); Serial.write(8);
+                idx--;
+              }
+              // Copy and display history command
+              strncpy(line, histCmd, sizeof(line) - 1);
+              line[sizeof(line) - 1] = '\0';
+              idx = strlen(line);
+              Serial.print(line);
+            }
+          } else {
+            // Restore saved line (back to current input)
+            cmdHistoryNav = -1;
             while (idx > 0) {
               Serial.write(8); Serial.write(' '); Serial.write(8);
               idx--;
             }
-            // Copy and display history command
-            strncpy(line, histCmd, sizeof(line) - 1);
-            line[sizeof(line) - 1] = '\0';
+            strncpy(line, savedLine, sizeof(line));
             idx = strlen(line);
             Serial.print(line);
           }
-        } else {
-          // Restore saved line (back to current input)
-          cmdHistoryNav = -1;
-          while (idx > 0) {
-            Serial.write(8); Serial.write(' '); Serial.write(8);
-            idx--;
-          }
-          strncpy(line, savedLine, sizeof(line));
-          idx = strlen(line);
-          Serial.print(line);
         }
-        continue;
       }
 
-      // Ignore other escape sequences
-      continue;
+      // Reset escape state and continue only if we handled the escape sequence
+      escState = 0;
+      if (handled) {
+        continue;
+      }
+      // If not handled, fall through to normal character processing
+      // This allows unrecognized escape sequences to be processed as regular input
     }
 
     // Reset escape state if we got something else
@@ -2280,6 +2286,8 @@ void cli_loop() {
     }
 
     if (c == '\r' || c == '\n') {
+      Serial.println();  // Echo newline to terminal
+
       if (idx == 0) {
         print_prompt();
         cmdHistoryNav = -1;  // Reset history navigation
@@ -2297,10 +2305,10 @@ void cli_loop() {
 
       toupper_ascii(line);
       for (char* s = line; *s; ++s) {
-  // Normalize dashes and clean control chars
-  if (*s == 0x96 || *s == 0x97) *s = '-';   // UTF-8 dash variants
-  if ((unsigned char)*s < 32 || (unsigned char)*s > 126) *s = ' ';
-}
+        // Normalize dashes and clean control chars
+        if (*s == 0x96 || *s == 0x97) *s = '-';   // UTF-8 dash variants
+        if ((unsigned char)*s < 32 || (unsigned char)*s > 126) *s = ' ';
+      }
 
       char* tok[40] = {0};
       uint8_t ntok = tokenize(line, tok, 40);

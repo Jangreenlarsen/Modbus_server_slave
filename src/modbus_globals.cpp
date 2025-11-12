@@ -92,3 +92,42 @@ void modbus_init_globals() {
   wrongSlaveID  = 0;
   responsesSent = 0;
 }
+
+// ============================================================================
+// GPIO-konflikt-håndtering
+// ============================================================================
+// Når en timer/counter tager DYNAMIC kontrol over en GPIO pin, skal
+// eventuel STATIC mapping fjernes og bruger skal advares
+void gpio_handle_dynamic_conflict(uint8_t pin) {
+  if (pin >= NUM_GPIO) return;
+
+  // Tjek om denne pin har en STATIC mapping (COIL eller INPUT)
+  bool hadConflict = false;
+  int16_t oldCoilIdx = gpioToCoil[pin];
+  int16_t oldInputIdx = gpioToInput[pin];
+
+  if (oldCoilIdx >= 0) {
+    Serial.print(F("⚠ GPIO-KONFLIKT: pin "));
+    Serial.print(pin);
+    Serial.print(F(" var STATIC mapped til coil "));
+    Serial.print((uint16_t)oldCoilIdx);
+    Serial.println(F(" – fjernet da timer/counter nu har kontrol (DYNAMIC)"));
+    gpioToCoil[pin] = -1;
+    hadConflict = true;
+  }
+
+  if (oldInputIdx >= 0) {
+    Serial.print(F("⚠ GPIO-KONFLIKT: pin "));
+    Serial.print(pin);
+    Serial.print(F(" var STATIC mapped til input "));
+    Serial.print((uint16_t)oldInputIdx);
+    Serial.println(F(" – fjernet da timer/counter nu har kontrol (DYNAMIC)"));
+    gpioToInput[pin] = -1;
+    hadConflict = true;
+  }
+
+  // Besked hvis der var en konflikt
+  if (hadConflict) {
+    Serial.println(F("% Du skal opdatere din config-fil!"));
+  }
+}

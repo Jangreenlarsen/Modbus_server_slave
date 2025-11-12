@@ -73,3 +73,7 @@ void  packBits     (const uint8_t *src, uint16_t start, uint16_t qty, uint8_t *d
 
 // Beregner RTU-gap (defineret i modbus_utils.cpp)
 unsigned long rtuGapUs(void);
+
+// GPIO-konflikt-håndtering: fjerner STATIC mapping hvis en DYNAMIC tager over
+// Skriver WARNING hvis der var en konflikt
+void gpio_handle_dynamic_conflict(uint8_t pin);

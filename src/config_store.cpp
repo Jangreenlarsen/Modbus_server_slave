@@ -213,15 +213,8 @@ for (uint8_t i = 0; i < coilStaticCount && i < MAX_STATIC_COILS; i++) {
     holdingRegs[timerStatusCtrlRegIndex] = 0;
 
   for (uint8_t i = 0; i < cfg.timerCount && i < 4; i++) {
-    timers[i] = cfg.timer[i];
-    TimerConfig &t = timers[i];
-
-    t.active = 0;
-    t.phase  = 0;
-    t.phaseStartMs = millis();
-
-    if (timerStatusCtrlRegIndex < NUM_REGS && t.statusRoEnable)
-      holdingRegs[timerStatusCtrlRegIndex] |= (1u << (t.id - 1));
+    // Use timers_config_set() to apply config (handles GPIO conflicts)
+    timers_config_set(cfg.timer[i].id, cfg.timer[i]);
   }
 
   // --- Counters ---

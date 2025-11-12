@@ -551,12 +551,19 @@ c.lastEdgeMs = 0;
   if (c.enabled && c.hwMode != 0) {
     // Map hwMode to hw_counter_id (hw_counter functions use 1=T1, 2=T3, 3=T4, 4=T5)
     uint8_t hw_id = 0;
-    if (c.hwMode == 1) hw_id = 1;       // Timer1
-    else if (c.hwMode == 3) hw_id = 2;  // Timer3
-    else if (c.hwMode == 4) hw_id = 3;  // Timer4
-    else if (c.hwMode == 5) hw_id = 4;  // Timer5
+    uint8_t pin = 0;
+
+    if (c.hwMode == 1) { hw_id = 1; pin = 5; }       // Timer1 = pin 5 (D5/T1)
+    else if (c.hwMode == 3) { hw_id = 2; pin = 47; } // Timer3 = pin 47 (D47/T3)
+    else if (c.hwMode == 4) { hw_id = 3; pin = 6; }  // Timer4 = pin 6 (D6/T4)
+    else if (c.hwMode == 5) { hw_id = 4; pin = 46; } // Timer5 = pin 46 (D46/T5)
 
     if (hw_id != 0) {
+      // Check for GPIO conflicts and remove STATIC mappings
+      if (pin > 0) {
+        gpio_handle_dynamic_conflict(pin);
+      }
+
       // Initialize HW timer with prescaler mode
       // prescaler field is used as mode for HW: 1=external clock, 2-5=internal prescale
       hw_counter_init(hw_id, c.prescaler);
@@ -591,12 +598,25 @@ void counters_reset(uint8_t id) {
   c.edgeCount    = 0;
   c.overflowFlag = 0;
 
-  // Reset frequency tracking
+  // Reset frequency tracking (SW mode)
   c.lastFreqCalcMs = 0;
   c.lastCountForFreq = 0;
   c.currentFreqHz = 0;
   if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
     holdingRegs[c.freqReg] = 0;
+  }
+
+  // Reset HW timer if in HW mode
+  if (c.hwMode != 0) {
+    uint8_t hw_id = 0;
+    if (c.hwMode == 1) hw_id = 1;       // Timer1
+    else if (c.hwMode == 3) hw_id = 2;  // Timer3
+    else if (c.hwMode == 4) hw_id = 3;  // Timer4
+    else if (c.hwMode == 5) hw_id = 4;  // Timer5
+
+    if (hw_id != 0) {
+      hw_counter_reset(hw_id);
+    }
   }
 
   if (c.overflowReg < NUM_REGS) {
@@ -607,29 +627,7 @@ void counters_reset(uint8_t id) {
 
 void counters_clear_all() {
   for (uint8_t id = 1; id <= 4; ++id) {
-    uint8_t idx = id - 1;
-    CounterConfig& c = counters[idx];
-
-    uint8_t bw = sanitizeBitWidth(c.bitWidth);
-    uint64_t sv = c.startValue;
-    sv = maskToBitWidth(sv, bw);
-
-    c.counterValue = sv;
-    c.edgeCount    = 0;
-    c.overflowFlag = 0;
-
-    // Reset frequency tracking
-    c.lastFreqCalcMs = 0;
-    c.lastCountForFreq = 0;
-    c.currentFreqHz = 0;
-    if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
-      holdingRegs[c.freqReg] = 0;
-    }
-
-    if (c.overflowReg < NUM_REGS) {
-      holdingRegs[c.overflowReg] = 0;
-    }
-    store_value_to_regs(idx);
+    counters_reset(id);  // Use common reset function for consistency
   }
 }
 

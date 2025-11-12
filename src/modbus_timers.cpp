@@ -248,6 +248,50 @@ bool timers_config_set(uint8_t id, const TimerConfig& src) {
   t.lastTrigLevel = di_read(t.trigIndex) ? 1 : 0;
   t.alarm       = 0;
   t.alarmCode   = 0;
+
+  // Check for GPIO conflicts on coil
+  // If timer controls a coil, check if any GPIO pin is STATIC mapped to that coil
+  if (t.enabled && t.coil < NUM_COILS) {
+    for (uint8_t pin = 0; pin < NUM_GPIO; ++pin) {
+      if (gpioToCoil[pin] == (int16_t)t.coil) {
+        // Found a GPIO pin mapped to this coil
+        Serial.print(F("⚠ GPIO-KONFLIKT: pin "));
+        Serial.print(pin);
+        Serial.print(F(" var STATIC mapped til coil "));
+        Serial.print(t.coil);
+        Serial.print(F(" – fjernet da timer "));
+        Serial.print(t.id);
+        Serial.println(F(" nu har kontrol (DYNAMIC)"));
+        Serial.println(F("% Du skal opdatere din config-fil!"));
+        gpioToCoil[pin] = -1;
+      }
+    }
+  }
+
+  // Check for GPIO conflicts on trigger input
+  // If timer uses trigger input, check if any GPIO pin is STATIC mapped to that input
+  if (t.enabled && t.mode == 4 && t.trigIndex < NUM_DISCRETE) {
+    for (uint8_t pin = 0; pin < NUM_GPIO; ++pin) {
+      if (gpioToInput[pin] == (int16_t)t.trigIndex) {
+        // Found a GPIO pin mapped to this input
+        Serial.print(F("⚠ GPIO-KONFLIKT: pin "));
+        Serial.print(pin);
+        Serial.print(F(" var STATIC mapped til input "));
+        Serial.print(t.trigIndex);
+        Serial.print(F(" – fjernet da timer "));
+        Serial.print(t.id);
+        Serial.println(F(" nu har kontrol (DYNAMIC)"));
+        Serial.println(F("% Du skal opdatere din config-fil!"));
+        gpioToInput[pin] = -1;
+      }
+    }
+  }
+
+  // Update timer status register if configured
+  if (timerStatusRegIndex < NUM_REGS && t.statusRoEnable) {
+    holdingRegs[timerStatusRegIndex] |= (1u << (t.id - 1));
+  }
+
   return true;
 }
 

@@ -1860,7 +1860,7 @@ static void cmd_persist(const char* verb) {
     }
 
     // gem GPIO mapping
-    for (uint8_t i = 0; i < MAX_GPIO_PINS; i++) {
+    for (uint8_t i = 0; i < NUM_GPIO; i++) {
       globalConfig.gpioToCoil[i]  = gpioToCoil[i];
       globalConfig.gpioToInput[i] = gpioToInput[i];
     }

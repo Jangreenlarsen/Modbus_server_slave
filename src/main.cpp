@@ -64,6 +64,10 @@ void setup() {
   Serial.println(F("% Enter CLI by typing: CLI"));
   Serial.println(F("% Line ending: NL or CR or Both, 115200 baud"));
   Serial.println(F("==============================================="));
+
+  // Enable interrupts globally (Arduino disables them during setup)
+  // This is required for HW counter ISRs to work
+  sei();
 }
 
 void loop() {

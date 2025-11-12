@@ -506,6 +506,22 @@ bool counters_config_set(uint8_t id, const CounterConfig& src) {
   if (id < 1 || id > 4) return false;
   uint8_t idx = id - 1;
 
+  // Check if HW-mode is being disabled or changed
+  // If so, remove any GPIO-input mapping for the old HW pin
+  CounterConfig& oldC = counters[idx];
+  if (oldC.enabled && oldC.hwMode != 0 && (!src.enabled || src.hwMode == 0)) {
+    // HW-mode being disabled - remove GPIO mapping
+    uint8_t oldPin = 0;
+    if (oldC.hwMode == 1) oldPin = 5;
+    else if (oldC.hwMode == 3) oldPin = 47;
+    else if (oldC.hwMode == 4) oldPin = 6;
+    else if (oldC.hwMode == 5) oldPin = 46;
+
+    if (oldPin > 0 && gpioToInput[oldPin] == (int16_t)oldC.inputIndex) {
+      gpioToInput[oldPin] = -1;  // Clear mapping
+    }
+  }
+
   CounterConfig c = src;
 
   c.controlReg    = src.controlReg;
@@ -562,6 +578,13 @@ c.lastEdgeMs = 0;
       // Check for GPIO conflicts and remove STATIC mappings
       if (pin > 0) {
         gpio_handle_dynamic_conflict(pin);
+      }
+
+      // Auto-map GPIO pin to discrete input for HW-mode counters
+      // This enables GPIO-polling to read the physical pin and write to discrete input
+      if (c.inputIndex < NUM_DISCRETE) {
+        gpioToInput[pin] = (int16_t)c.inputIndex;
+        pinMode(pin, INPUT);
       }
 
       // Initialize HW timer with prescaler mode

@@ -50,14 +50,18 @@ bool configLoad(PersistConfig &cfg) {
 
   // Check magic and CRC
   if (cfg.magic != 0xC0DE) {
-    Serial.println(F("! EEPROM magic invalid"));
+    Serial.print(F("! EEPROM magic invalid (got 0x"));
+    Serial.print(cfg.magic, HEX);
+    Serial.println(F(")"));
     configDefaults(cfg);
     return false;  // Let main.cpp handle save
   }
 
   // Schema check BEFORE CRC (CRC layout may have changed)
   if (cfg.schema != 9 && cfg.schema != 10) {
-    Serial.println(F("! EEPROM schema unknown"));
+    Serial.print(F("! EEPROM schema unknown (got "));
+    Serial.print(cfg.schema);
+    Serial.println(F(")"));
     configDefaults(cfg);
     return false;  // Let main.cpp handle save
   }
@@ -84,7 +88,16 @@ bool configLoad(PersistConfig &cfg) {
   // Schema 10 validation
   if (cfg.schema == 10) {
     if (!checkCrc(cfg)) {
-      Serial.println(F("! EEPROM CRC invalid"));
+      Serial.print(F("! EEPROM CRC invalid (expected 0x"));
+      Serial.print(cfg.crc, HEX);
+      uint16_t computed = 0;
+      // Quick CRC recompute to show difference
+      for (uint16_t i = 0; i < sizeof(PersistConfig) - 2; i++) {
+        computed += ((uint8_t*)&cfg)[i];
+      }
+      Serial.print(F(" computed 0x"));
+      Serial.print(computed, HEX);
+      Serial.println(F(")"));
       configDefaults(cfg);
       return false;  // Let main.cpp handle save
     }

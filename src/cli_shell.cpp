@@ -1830,16 +1830,33 @@ static void cmd_persist(const char* verb) {
       globalConfig.coilStaticVal[i] = coilStaticVal[i] ? 1 : 0;
     }
 
-    // timere: gem alle 4
+    // timere: gem alle 4 (nulstil runtime-felter først)
     globalConfig.timerCount = 4;
     for (uint8_t i = 0; i < 4; i++) {
       globalConfig.timer[i] = timers[i];
+      // Nulstil runtime-felter som IKKE skal gemmes
+      globalConfig.timer[i].active = 0;
+      globalConfig.timer[i].phase = 0;
+      globalConfig.timer[i].phaseStartMs = 0;
+      globalConfig.timer[i].lastTrigLevel = 0;
+      globalConfig.timer[i].alarm = 0;
+      globalConfig.timer[i].alarmCode = 0;
+      globalConfig.timer[i].lastDurationMs = 0;
     }
 
-    // Counters: gem alle 4 (enabled-flag og config afgør brugen)
+    // Counters: gem alle 4 (nulstil runtime-felter først)
     globalConfig.counterCount = 4;
     for (uint8_t i = 0; i < 4; i++) {
       globalConfig.counter[i] = counters[i];
+      // Nulstil runtime-felter som IKKE skal gemmes
+      globalConfig.counter[i].counterValue = globalConfig.counter[i].startValue;
+      globalConfig.counter[i].edgeCount = 0;
+      globalConfig.counter[i].overflowFlag = 0;
+      globalConfig.counter[i].lastLevel = 0;
+      globalConfig.counter[i].lastEdgeMs = 0;
+      globalConfig.counter[i].lastCountForFreq = 0;
+      globalConfig.counter[i].lastFreqCalcMs = 0;
+      globalConfig.counter[i].currentFreqHz = 0;
     }
 
     // gem GPIO mapping

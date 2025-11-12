@@ -901,6 +901,150 @@ static bool isSupportedBaud(unsigned long nb) {
   return false;
 }
 
+// ---------- Register overlap validation ----------
+// Helper function to get the number of registers used by a bitwidth
+static uint8_t regsForBitWidth(uint8_t bitWidth) {
+  switch (bitWidth) {
+    case 8:  return 1;
+    case 16: return 1;
+    case 32: return 2;
+    case 64: return 4;
+    default: return 2;  // default to 32-bit = 2 regs
+  }
+}
+
+// Check if two register ranges overlap
+static bool regsOverlap(uint16_t start1, uint8_t len1, uint16_t start2, uint8_t len2) {
+  uint16_t end1 = start1 + len1 - 1;
+  uint16_t end2 = start2 + len2 - 1;
+  return !(end1 < start2 || end2 < start1);
+}
+
+// Validate counter register configuration for overlaps
+static bool validateCounterRegisters(const CounterConfig& newCfg, uint8_t excludeCounterId = 0) {
+  // Collect all registers used by this counter
+  uint16_t regsToCheck[5];  // index, raw, freq, ctrl, overflow
+  uint8_t regCounts[5];     // how many regs each uses
+  uint8_t numRegs = 0;
+
+  // Get bitwidth-dependent register count for index and raw registers
+  uint8_t indexRegCount = regsForBitWidth(newCfg.bitWidth);
+
+  if (newCfg.regIndex < NUM_REGS) {
+    regsToCheck[numRegs] = newCfg.regIndex;
+    regCounts[numRegs] = indexRegCount;
+    numRegs++;
+  }
+
+  if (newCfg.rawReg < NUM_REGS) {
+    regsToCheck[numRegs] = newCfg.rawReg;
+    regCounts[numRegs] = indexRegCount;
+    numRegs++;
+  }
+
+  if (newCfg.freqReg < NUM_REGS) {
+    regsToCheck[numRegs] = newCfg.freqReg;
+    regCounts[numRegs] = 1;
+    numRegs++;
+  }
+
+  if (newCfg.controlReg < NUM_REGS) {
+    regsToCheck[numRegs] = newCfg.controlReg;
+    regCounts[numRegs] = 1;
+    numRegs++;
+  }
+
+  if (newCfg.overflowReg < NUM_REGS) {
+    regsToCheck[numRegs] = newCfg.overflowReg;
+    regCounts[numRegs] = 1;
+    numRegs++;
+  }
+
+  // Check internal overlaps within this counter (e.g., index-reg and raw-reg can't overlap)
+  for (uint8_t i = 0; i < numRegs; i++) {
+    for (uint8_t j = i + 1; j < numRegs; j++) {
+      if (regsOverlap(regsToCheck[i], regCounts[i], regsToCheck[j], regCounts[j])) {
+        Serial.print(F("% ERROR: Counter registers overlap internally (regs "));
+        Serial.print(regsToCheck[i]); Serial.print(F(".."));
+        Serial.print(regsToCheck[i] + regCounts[i] - 1);
+        Serial.print(F(" and "));
+        Serial.print(regsToCheck[j]); Serial.print(F(".."));
+        Serial.print(regsToCheck[j] + regCounts[j] - 1);
+        Serial.println(F(")"));
+        return false;
+      }
+    }
+  }
+
+  // Check overlap with other counters
+  for (uint8_t otherId = 1; otherId <= 4; otherId++) {
+    if (otherId == newCfg.id || otherId == excludeCounterId) continue;
+
+    CounterConfig other;
+    if (!counters_get(otherId, other) || !other.enabled) continue;
+
+    uint8_t otherRegCount = regsForBitWidth(other.bitWidth);
+
+    // Check each register in newCfg against other's registers
+    for (uint8_t i = 0; i < numRegs; i++) {
+      // Check index-reg
+      if (other.regIndex < NUM_REGS &&
+          regsOverlap(regsToCheck[i], regCounts[i], other.regIndex, otherRegCount)) {
+        Serial.print(F("% ERROR: Counter ")); Serial.print(newCfg.id);
+        Serial.print(F(" overlaps with Counter ")); Serial.print(otherId);
+        Serial.print(F(" (reg ")); Serial.print(regsToCheck[i]);
+        Serial.print(F(" conflicts with index-reg ")); Serial.print(other.regIndex);
+        Serial.println(F(")"));
+        return false;
+      }
+      // Check raw-reg
+      if (other.rawReg < NUM_REGS &&
+          regsOverlap(regsToCheck[i], regCounts[i], other.rawReg, otherRegCount)) {
+        Serial.print(F("% ERROR: Counter ")); Serial.print(newCfg.id);
+        Serial.print(F(" overlaps with Counter ")); Serial.print(otherId);
+        Serial.print(F(" (reg ")); Serial.print(regsToCheck[i]);
+        Serial.print(F(" conflicts with raw-reg ")); Serial.print(other.rawReg);
+        Serial.println(F(")"));
+        return false;
+      }
+      // Check control-reg
+      if (other.controlReg < NUM_REGS &&
+          regsOverlap(regsToCheck[i], regCounts[i], other.controlReg, 1)) {
+        Serial.print(F("% ERROR: Counter ")); Serial.print(newCfg.id);
+        Serial.print(F(" overlaps with Counter ")); Serial.print(otherId);
+        Serial.print(F(" control-reg ")); Serial.print(other.controlReg);
+        Serial.println(F(")"));
+        return false;
+      }
+    }
+  }
+
+  // Check overlap with timer global registers
+  extern uint16_t timerStatusRegIndex;
+  extern uint16_t timerStatusCtrlRegIndex;
+
+  for (uint8_t i = 0; i < numRegs; i++) {
+    // Check against timer status register
+    if (timerStatusRegIndex < NUM_REGS &&
+        regsOverlap(regsToCheck[i], regCounts[i], timerStatusRegIndex, 1)) {
+      Serial.print(F("% ERROR: Counter ")); Serial.print(newCfg.id);
+      Serial.print(F(" overlaps with timer status register "));
+      Serial.println(timerStatusRegIndex);
+      return false;
+    }
+    // Check against timer control register
+    if (timerStatusCtrlRegIndex < NUM_REGS &&
+        regsOverlap(regsToCheck[i], regCounts[i], timerStatusCtrlRegIndex, 1)) {
+      Serial.print(F("% ERROR: Counter ")); Serial.print(newCfg.id);
+      Serial.print(F(" overlaps with timer control register "));
+      Serial.println(timerStatusCtrlRegIndex);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 static void cmd_set_counter(uint8_t ntok, char* tok[]) {
   //  - Counter syntaks:
   //      set counter <id> mode 1 parameter
@@ -1169,6 +1313,12 @@ uint8_t start = 5;
     return;
   }
 
+  // Validate register configuration before setting
+  if (!validateCounterRegisters(cfg)) {
+    Serial.println(F("% Counter configuration rejected due to register conflicts"));
+    return;
+  }
+
   if (!counters_config_set(id, cfg)) {
     Serial.println(F("% Could not set counter config"));
     return;
@@ -1260,6 +1410,35 @@ if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "REG") &&
       return;
     }
     uint16_t val = (uint16_t)strtoul(tok[5], nullptr, 10);
+
+    // Validate static reg doesn't conflict with counter or timer registers
+    for (uint8_t i = 1; i <= 4; i++) {
+      CounterConfig c;
+      if (!counters_get(i, c) || !c.enabled) continue;
+
+      uint8_t bitWidthRegs = regsForBitWidth(c.bitWidth);
+
+      // Check all counter registers
+      if ((c.regIndex < NUM_REGS && regsOverlap(addr, 1, c.regIndex, bitWidthRegs)) ||
+          (c.rawReg < NUM_REGS && regsOverlap(addr, 1, c.rawReg, bitWidthRegs)) ||
+          (c.freqReg < NUM_REGS && regsOverlap(addr, 1, c.freqReg, 1)) ||
+          (c.controlReg < NUM_REGS && regsOverlap(addr, 1, c.controlReg, 1)) ||
+          (c.overflowReg < NUM_REGS && regsOverlap(addr, 1, c.overflowReg, 1))) {
+        Serial.print(F("% ERROR: Static reg ")); Serial.print(addr);
+        Serial.print(F(" overlaps with Counter ")); Serial.print(i);
+        Serial.println(F(" registers"));
+        return;
+      }
+    }
+
+    // Check against timer global registers
+    extern uint16_t timerStatusRegIndex;
+    extern uint16_t timerStatusCtrlRegIndex;
+    if ((timerStatusRegIndex < NUM_REGS && regsOverlap(addr, 1, timerStatusRegIndex, 1)) ||
+        (timerStatusCtrlRegIndex < NUM_REGS && regsOverlap(addr, 1, timerStatusCtrlRegIndex, 1))) {
+      Serial.println(F("% ERROR: Static reg overlaps with timer control registers"));
+      return;
+    }
 
     if (!reg_static_upsert(addr, val)) {
       Serial.println(F("% Could not store static reg (limit reached?)"));
@@ -1699,83 +1878,176 @@ static void cmd_persist(const char* verb) {
 }
 
 // ---------- Help ----------
-static void cmd_help() {
-  Serial.println(F("=== COMMANDS ==="));
-  Serial.println(F(" show config|stats|regs|coils|inputs|timers|counters|version|gpio"));
-  Serial.println(F(" save | load | defaults"));
-  Serial.println(F(" reboot                      - Restart systemet (software reset)"));
-  Serial.println(F(" ---"));
-  Serial.println(F(" read reg <addr> [qty=1]"));
-  Serial.println(F(" read coil <idx> [qty=1]"));
-  Serial.println(F(" read input <idx> [qty=1]"));
-  Serial.println(F(" write reg <addr> <value>"));
-  Serial.println(F(" write coil <idx> <0|1>"));
-  Serial.println(F(" dump regs|coils|inputs"));
-  Serial.println(F(" set reg static <addr> value <val>"));
-  Serial.println(F(" set coil static <idx> <ON|OFF|0|1>"));
-  Serial.println(F(" ---"));
-  Serial.println(F(" set id <n> (0 = respond-all, or 1..247)"));
-  Serial.println(F(" set baud <n>"));
-  Serial.println(F(" set server on|off"));
-  Serial.println(F(" set mode server|monitor"));
-  Serial.println(F(" ---"));
-  Serial.println(F(" set timer <id> mode <1|2|3|4> parameter P1:<high|low> P2:<high|low> [P3:<high|low>]"));
-  Serial.println(F("   T1 <ms> [T2 <ms>] [T3 <ms>] coil <idx> [trigger <di_idx> edge rising|falling|both sub <1|2|3>]"));
-  Serial.println(F(" set timers status-reg:<n> "));
-  Serial.println(F(" set control-reg:<n> "));
-  Serial.println(F(" no set timer <id>           - remove timer from configuration"));
-  Serial.println(F(" ---"));
+// ---------- Contextual help functions ----------
+static void help_counters() {
+  Serial.println(F("=== COUNTERS ==="));
+  Serial.println(F(" show counters                       - show active counters + control register status"));
+  Serial.println();
+  Serial.println(F(" Configuration:"));
   Serial.println(F(" set counter <id> mode 1 parameter count-on:<rising|falling|both>"));
   Serial.println(F("   start-value:<n> res|resolution:<8|16|32|64> prescaler:<1..256>"));
-  Serial.println(F("   index-reg:<reg> raw-reg:<reg> freq-reg:<reg> overload-reg:<reg> ctrl-reg:<reg>"));
+  Serial.println(F("   index-reg:<reg> raw-reg:<reg> freq-reg:<reg> ctrl-reg:<reg> overload-reg:<reg>"));
   Serial.println(F("   input-dis:<di_idx> direction:<up|down> scale:<float>"));
   Serial.println(F("   debounce:<on|off> [debounce-ms:<ms>]"));
-  Serial.println(F("   hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5> [v3.3.0 - select HW timer (T1=pin5, T3=pin47, T4=pin6, T5=pin46)]"));
+  Serial.println(F("   hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5> [select HW timer]"));
+  Serial.println();
+  Serial.println(F(" Control:"));
   Serial.println(F(" set counter <id> reset-on-read ENABLE|DISABLE"));
-  Serial.println(F("   - Enable/disable counter reset-on-read (bit 3 in control register)"));
+  Serial.println(F("   - Enable/disable reset-on-read (bit 3 in control register)"));
   Serial.println(F(" set counter <id> start ENABLE|DISABLE"));
-  Serial.println(F("   - Enable/disable counter (starts immediately and on boot)"));
+  Serial.println(F("   - Enable/disable counter auto-start on boot"));
   Serial.println(F(" no set counter <id>         - remove counter from configuration"));
   Serial.println(F(" reset counter <id>          - reset selected counter"));
   Serial.println(F(" clear counters              - reset all counters and overflow flags"));
+  Serial.println();
   Serial.println(F(" -- Bitmask controlReg (counter): --"));
   Serial.println(F("  bit0 = reset  (load start-value, clear overflow)"));
   Serial.println(F("  bit1 = start  (start counting)"));
   Serial.println(F("  bit2 = stop   (stop counting)"));
   Serial.println(F("  bit3 = reset-on-read enable (sticky - saved to EEPROM)"));
   Serial.println(F("  NOTE: All bits writable via Modbus FC6, but only bit3 persists"));
-  Serial.println(F(" ---"));
+  Serial.println();
+  Serial.println(F(" -- Register configuration notes: --"));
+  Serial.println(F("  index-reg:  scaled output register (uses 1/2/4 regs for 8/16/32/64-bit)"));
+  Serial.println(F("  raw-reg:    unscaled output register (same width as index-reg)"));
+  Serial.println(F("  freq-reg:   frequency measurement in Hz (1 register)"));
+  Serial.println(F("  ctrl-reg:   control bitmask (1 register, writable via Modbus)"));
+  Serial.println(F("  overload-reg: overflow flag (1 register)"));
+  Serial.println(F("  IMPORTANT: Registers must not overlap between counters or timers!"));
+  Serial.println();
+  Serial.println(F(" Examples:"));
+  Serial.println(F("  set counter 1 mode 1 parameter count-on:rising start-value:0 res:32 prescaler:1"));
+  Serial.println(F("   index-reg:100 raw-reg:104 freq-reg:108 ctrl-reg:110 overload-reg:120"));
+  Serial.println(F("   input-dis:12 direction:up scale:1.0 debounce:on debounce-ms:25"));
+}
+
+static void help_timers() {
+  Serial.println(F("=== TIMERS ==="));
+  Serial.println(F(" show timers                         - show active timer mappings/status"));
+  Serial.println();
+  Serial.println(F(" set timer <id> mode <1|2|3|4> parameter P1:<high|low> P2:<high|low> [P3:<high|low>]"));
+  Serial.println(F("   T1 <ms> [T2 <ms>] [T3 <ms>] coil <idx> [trigger <di_idx> edge rising|falling|both sub <1|2|3>]"));
+  Serial.println();
+  Serial.println(F(" set timers status-reg:<n>"));
+  Serial.println(F("   - Configure global status register (shows timer states)"));
+  Serial.println();
+  Serial.println(F(" set timers control-reg:<n>"));
+  Serial.println(F("   - Configure global control register (trigger timers)"));
+  Serial.println();
+  Serial.println(F(" no set timer <id>           - remove timer from configuration"));
+  Serial.println();
+  Serial.println(F(" Timer Modes:"));
+  Serial.println(F("  1 = One-shot sequence (3-phase timing)"));
+  Serial.println(F("  2 = Monostable (retriggerable pulse)"));
+  Serial.println(F("  3 = Astable (blink/toggle)"));
+  Serial.println(F("  4 = Input-triggered (responds to discrete inputs)"));
   Serial.println();
   Serial.println(F(" Examples:"));
   Serial.println(F("  set timer 1 mode 1 parameter P1:low P2:high P3:low T1 1000 T2 500 T3 1000 coil 5"));
   Serial.println(F("  set timer 3 mode 3 parameter P1:low P2:high T1 300 T2 700 coil 10"));
   Serial.println(F("  set timer 4 mode 4 parameter P1:low P2:high T1 200 T2 300 coil 15 trigger 12 edge rising sub 1"));
-  Serial.println(F("  no set timer 1"));
-  Serial.println();
-  Serial.println(F("  set counter 1 mode 1 parameter count-on:rising start-value:0 res:32 prescaler:1"));
-  Serial.println(F("   index-reg:100 raw-reg:104 freq-reg:108 overload-reg:120 ctrl-reg:130"));
-  Serial.println(F("   input-dis:12 direction:down scale:2.500 debounce:on debounce-ms:25"));
-  Serial.println();
-  Serial.println(F("  set reg static 150 value 1234"));
-  Serial.println(F("  set coil static 10 ON"));
-  Serial.println(F("  gpio map 20 input 12"));
-  Serial.println(F("  gpio unmap 20"));
-  Serial.println();
-  Serial.println(F("================="));
-  Serial.println(F("Hardware Interrupt capable pins (Arduino Mega2560):"));
-  Serial.println(F("  INT0 : Pin 2,3,18,19,20,21"));
-
 }
 
-static void cli_print_extended_help() {
-  Serial.println(F(" show inputs                         - show all discrete inputs"));
-  Serial.println(F(" read input <idx> [qty]              - read one or more discrete inputs"));
-  Serial.println(F(" dump inputs                         - dump all discrete inputs"));
+static void help_regs_coils_inputs() {
+  Serial.println(F("=== REGISTERS, COILS & INPUTS ==="));
+  Serial.println(F(" show regs | show coils | show inputs - show all data"));
+  Serial.println(F(" show config                         - show all configuration"));
+  Serial.println();
+  Serial.println(F(" read reg <addr> [qty=1]             - read holding register(s)"));
+  Serial.println(F(" read coil <idx> [qty=1]             - read coil(s)"));
+  Serial.println(F(" read input <idx> [qty=1]            - read discrete input(s)"));
+  Serial.println();
+  Serial.println(F(" write reg <addr> <value>            - write to holding register"));
+  Serial.println(F(" write coil <idx> <0|1>              - write to coil"));
+  Serial.println();
+  Serial.println(F(" dump regs | dump coils | dump inputs - hex dump of all data"));
+  Serial.println();
+  Serial.println(F(" set reg static <addr> value <val>   - set register to fixed value"));
+  Serial.println(F(" set coil static <idx> <ON|OFF|0|1>  - set coil to fixed value"));
+  Serial.println();
+  Serial.println(F(" Examples:"));
+  Serial.println(F("  read reg 100 10       - read 10 registers starting at 100"));
+  Serial.println(F("  write reg 50 1234     - set register 50 to 1234"));
+  Serial.println(F("  set reg static 150 value 1000"));
+  Serial.println(F("  set coil static 10 ON"));
+}
+
+static void help_gpio() {
+  Serial.println(F("=== GPIO ==="));
+  Serial.println(F(" show gpio                           - show active GPIO mappings"));
+  Serial.println();
   Serial.println(F(" gpio map <pin> coil|input <idx>     - map GPIO pin to coil or input"));
   Serial.println(F(" gpio unmap <pin>                    - unmap GPIO pin"));
-  Serial.println(F(" show gpio                           - show active GPIO mappings"));
-  Serial.println(F(" show timers                         - show active timer mappings/status"));
-  Serial.println(F(" show counters                       - show active counters + control register status"));
+  Serial.println();
+  Serial.println(F(" Hardware Interrupt capable pins (Arduino Mega2560):"));
+  Serial.println(F("  INT0 : Pin 2,3,18,19,20,21"));
+  Serial.println();
+  Serial.println(F(" Examples:"));
+  Serial.println(F("  gpio map 20 input 12    - map pin 20 as discrete input 12"));
+  Serial.println(F("  gpio map 30 coil 5      - map pin 30 as coil 5"));
+  Serial.println(F("  gpio unmap 20           - remove mapping from pin 20"));
+}
+
+static void help_system() {
+  Serial.println(F("=== SYSTEM ==="));
+  Serial.println(F(" show config | show stats | show version  - show system info"));
+  Serial.println();
+  Serial.println(F(" save                    - save configuration to EEPROM"));
+  Serial.println(F(" load                    - load configuration from EEPROM"));
+  Serial.println(F(" defaults                - reset to default configuration"));
+  Serial.println();
+  Serial.println(F(" set id <n>              - set Modbus slave ID (0=all, 1..247)"));
+  Serial.println(F(" set baud <n>            - set Modbus baudrate (e.g. 9600, 19200)"));
+  Serial.println(F(" set server on|off       - enable/disable Modbus server"));
+  Serial.println(F(" set mode server|monitor - toggle server/monitor mode"));
+  Serial.println();
+  Serial.println(F(" reboot                  - restart system (software reset)"));
+  Serial.println();
+  Serial.println(F(" Examples:"));
+  Serial.println(F("  set id 1              - set slave ID to 1"));
+  Serial.println(F("  set baud 19200        - set baudrate to 19200"));
+}
+
+static void cmd_help(uint8_t ntok, char* tok[]) {
+  if (ntok == 1) {
+    // No argument - show main help with all sections
+    Serial.println(F("=== COMMANDS ==="));
+    Serial.println();
+    Serial.println(F(" Use 'help <section>' for detailed help. Available sections:"));
+    Serial.println(F("  - help counters   : Counter configuration and control"));
+    Serial.println(F("  - help timers     : Timer configuration and modes"));
+    Serial.println(F("  - help inputs     : Registers, coils, and discrete inputs"));
+    Serial.println(F("  - help gpio       : GPIO pin mapping"));
+    Serial.println(F("  - help system     : System configuration and persistence"));
+    Serial.println();
+    Serial.println(F(" Or use 'help' with 'counters', 'timers', 'inputs', 'gpio', 'system'"));
+    Serial.println();
+    return;
+  }
+
+  // With argument - show specific section
+  const char* section = tok[1];
+
+  if (!strcmp(section, "COUNTERS")) {
+    help_counters();
+  }
+  else if (!strcmp(section, "TIMERS")) {
+    help_timers();
+  }
+  else if (!strcmp(section, "INPUTS") || !strcmp(section, "REGS") || !strcmp(section, "COILS")) {
+    help_regs_coils_inputs();
+  }
+  else if (!strcmp(section, "GPIO")) {
+    help_gpio();
+  }
+  else if (!strcmp(section, "SYSTEM")) {
+    help_system();
+  }
+  else {
+    Serial.print(F("Unknown help section: "));
+    Serial.println(section);
+    Serial.println(F("Try: help counters, help timers, help inputs, help gpio, help system"));
+  }
 }
 
 // ---------- Counter helper commands ----------
@@ -2047,8 +2319,7 @@ void cli_loop() {
         return;
       }
       else if (!strcmp(tok[0],"HELP")) {
-        cmd_help();
-        cli_print_extended_help();
+        cmd_help(ntok, tok);
       }
       else if (!strcmp(tok[0],"SHOW"))             cmd_show(ntok, tok);
       else if (!strcmp(tok[0],"READ"))             cmd_read(ntok, tok);

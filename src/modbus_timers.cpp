@@ -249,7 +249,7 @@ bool timers_config_set(uint8_t id, const TimerConfig& src) {
   t.alarm       = 0;
   t.alarmCode   = 0;
 
-  // Check for GPIO conflicts on coil
+  // Check for GPIO conflicts on coil (only if timer is enabled)
   // If timer controls a coil, check if any GPIO pin is STATIC mapped to that coil
   if (t.enabled && t.coil < NUM_COILS) {
     for (uint8_t pin = 0; pin < NUM_GPIO; ++pin) {
@@ -268,7 +268,7 @@ bool timers_config_set(uint8_t id, const TimerConfig& src) {
     }
   }
 
-  // Check for GPIO conflicts on trigger input
+  // Check for GPIO conflicts on trigger input (only if timer is enabled AND mode is 4)
   // If timer uses trigger input, check if any GPIO pin is STATIC mapped to that input
   if (t.enabled && t.mode == 4 && t.trigIndex < NUM_DISCRETE) {
     for (uint8_t pin = 0; pin < NUM_GPIO; ++pin) {

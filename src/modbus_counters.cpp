@@ -506,19 +506,31 @@ bool counters_config_set(uint8_t id, const CounterConfig& src) {
   if (id < 1 || id > 4) return false;
   uint8_t idx = id - 1;
 
-  // Check if HW-mode is being disabled or changed
+  // Check if HW-mode is being disabled or changed to a different pin
   // If so, remove any GPIO-input mapping for the old HW pin
   CounterConfig& oldC = counters[idx];
-  if (oldC.enabled && oldC.hwMode != 0 && (!src.enabled || src.hwMode == 0)) {
-    // HW-mode being disabled - remove GPIO mapping
+  if (oldC.enabled && oldC.hwMode != 0 && (!src.enabled || src.hwMode == 0 || oldC.hwMode != src.hwMode)) {
+    // HW-mode being disabled or changed to different timer
+    // Only remove if the new config is not HW-mode OR uses a different timer pin
     uint8_t oldPin = 0;
     if (oldC.hwMode == 1) oldPin = 5;
     else if (oldC.hwMode == 3) oldPin = 47;
     else if (oldC.hwMode == 4) oldPin = 6;
     else if (oldC.hwMode == 5) oldPin = 46;
 
+    // Only clear if: old pin was mapped AND (not transitioning to same pin with HW-mode)
     if (oldPin > 0 && gpioToInput[oldPin] == (int16_t)oldC.inputIndex) {
-      gpioToInput[oldPin] = -1;  // Clear mapping
+      // Check if new config will keep the same HW pin
+      uint8_t newPin = 0;
+      if (src.hwMode == 1) newPin = 5;
+      else if (src.hwMode == 3) newPin = 47;
+      else if (src.hwMode == 4) newPin = 6;
+      else if (src.hwMode == 5) newPin = 46;
+
+      // Only clear if pins are different or HW-mode is being disabled
+      if (oldPin != newPin || src.hwMode == 0) {
+        gpioToInput[oldPin] = -1;  // Clear mapping
+      }
     }
   }
 

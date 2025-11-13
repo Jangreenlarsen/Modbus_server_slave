@@ -716,7 +716,7 @@ c.lastEdgeMs = 0;
     } else {
       // Only Timer5 (hwMode=5) is supported - Pin 47 (PL2/T5)
       uint8_t hw_id = 4;  // Timer5
-      uint8_t pin = 47;   // Pin 47 (PL2/T5) - ONLY external clock input on Arduino Mega 2560
+      uint8_t pin = 47;   // Pin 47 (PL2/T5) - ONLY Timer5 external clock input on Arduino Mega 2560
 
       if (hw_id != 0) {
       // Check for GPIO conflicts and remove STATIC mappings
@@ -878,7 +878,7 @@ void counters_print_status() {
       if (c.hwMode == 1) gpioPin = 5;
       else if (c.hwMode == 3) gpioPin = 47;
       else if (c.hwMode == 4) gpioPin = 6;
-      else if (c.hwMode == 5) gpioPin = 46;
+      else if (c.hwMode == 5) gpioPin = 47;
       sprintf(buf, "%-5d| ", gpioPin);
     } else if (c.hwMode == 0 && c.interruptPin > 0) {
       // SW-ISR mode: show interrupt pin directly

@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Language Requirement
+
+**ALTID TALE PÅ DANSK** - Uanset om brugeren skriver på dansk, engelsk eller andet sprog, skal Claude ALTID svare og kommunikere på dansk. Dette er et dansk projekt med dansk udvikler.
+
 ## Project Overview
 
 **Modbus RTU Server v3.2.0** is a production-ready embedded system for Arduino Mega 2560 that implements a complete Modbus RTU slave server with advanced features including TimerEngine, CounterEngine with frequency measurement, and an interactive CLI interface.
@@ -27,10 +31,15 @@ The codebase is organized into three main execution subsystems:
 
 3. **CounterEngine** (`src/modbus_counters.cpp`, `include/modbus_counters.h`) - 4 independent input counters with:
    - Edge detection (rising/falling/both)
-   - Prescaler (1-256), direction (up/down), bit width (8/16/32/64)
+   - Unified prescaler (1, 4, 16, 64, 256, 1024), direction (up/down), bit width (8/16/32/64)
    - Float scale factor for value transformation
    - Debounce filtering (configurable ms)
-   - **v3.2.0 Features**: Frequency measurement (Hz), separate raw registers, consistent naming
+   - **Three Operating Modes (v3.4.0 refactored)**:
+     - **SW (Polling)**: `hw-mode:sw` - Software polling via discrete inputs (low-frequency, low latency jitter)
+     - **SW-ISR (Interrupt)**: `hw-mode:sw-isr` - Hardware interrupt-driven (high-frequency, deterministic)
+     - **HW (Timer5)**: `hw-mode:hw-t5` - Hardware Timer5 external clock only (pin 46, max ~20 kHz)
+   - **Hardware Limitation**: Arduino Mega 2560 only routes Timer5 external clock to headers. Timer1, Timer3, Timer4 clock inputs are NOT accessible.
+   - Frequency measurement (Hz), separate raw registers, consistent unified prescaler values
    - Three output registers per counter: index-reg (scaled), raw-reg (unscaled), freq-reg (Hz)
    - Runs via `counters_loop()` from main loop
 
@@ -108,8 +117,24 @@ pio device monitor -p COM3 -b 115200
   - `indexReg`: scaled value (counterValue × scale)
   - `rawReg`: unscaled raw counter value
   - `freqReg`: frequency measurement in Hz (0-20000)
+- **Unified Prescaler Values (v3.4.0):**
+  - All modes (SW polling, SW-ISR, HW Timer5) support: **1, 4, 16, 64, 256, 1024**
+  - **1** = No prescale (every edge counts / external clock on Timer5)
+  - **4, 16, 64, 256** = Internal prescale factors
+  - **1024** = Maximum prescale (divide by 1024)
+- **Counter Setup Workflow:**
+  1. **SW (Polling) Mode**: `set counter <id> mode 1 parameter hw-mode:sw input-dis:<N> ...`
+     - Uses discrete input index for polling
+     - User can optionally map GPIO: `gpio map <pin> input <N>`
+  2. **SW-ISR Mode**: `set counter <id> mode 1 parameter hw-mode:sw-isr input-dis:<N> interrupt-pin:<INT> ...`
+     - Requires GPIO mapping: `gpio map <INT_PIN> input <N>` (must use INT0-INT5 pins: 2,3,18,19,20,21)
+     - Validates mapping exists before enabling
+     - Error if mapping missing: `gpio map 21 input 13`
+  3. **HW Timer5 Mode**: `set counter <id> mode 1 parameter hw-mode:hw-t5 input-dis:<N> ...`
+     - Automatic GPIO mapping to pin 46 (T5)
+- ScaleFloat can be used in all modes for output scaling
 - CLI parsing in `cli_shell.cpp` uses `set counter <id> mode 1 parameter ...` syntax
-- Frequency measurement runs every second with validation (timing window 1-2sec, delta validation, clamping)
+- Frequency measurement runs every second with validation (timing window 1-2sec, delta validation, clamping 0-20kHz)
 
 ### Adding Timer Features
 - Timer configuration in `TimerConfig` struct (see `modbus_timers.h`)

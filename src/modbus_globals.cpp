@@ -73,6 +73,8 @@ void modbus_init_globals() {
   memset(coilStaticIdx, 0, sizeof(coilStaticIdx));
   memset(coilStaticVal, 0, sizeof(coilStaticVal));
 
+  // Initialize GPIO arrays to -1 (no mapping)
+  // GPIO mappings are now runtime-only and not persisted (v3.3.1)
   for (uint8_t p = 0; p < NUM_GPIO; ++p) {
     gpioToCoil[p]  = -1;
     gpioToInput[p] = -1;

@@ -1,0 +1,345 @@
+// ============================================================================
+//  Filnavn : modbus_counters_sw_int.cpp
+//  Projekt  : Modbus RTU Server / CLI
+//  Version  : v3.3.0 (2025-11-13)
+//  Forfatter: JanG at modbus_slave@laces.dk
+//  Formål   : External interrupt handling for SW-mode counters.
+//             Provides 6 ISRs for INT0-INT5 (pins 2,3,18,19,20,21).
+//             Prevents CLI operations from blocking edge detection.
+// ============================================================================
+
+#include "modbus_counters_sw_int.h"
+#include "modbus_counters.h"
+#include "modbus_core.h"
+#include <string.h>
+
+// ============================================================================
+// Interrupt Pin Mapping
+// ============================================================================
+// Maps counter IDs (1..4) to attached interrupt pins
+static uint8_t counterToInterruptPin[4] = {0, 0, 0, 0};  // 0 = not attached
+
+// Maps interrupt numbers (0..5) to counter IDs
+// 0 = not used, 1-4 = counter ID
+static uint8_t interruptToCounter[6] = {0, 0, 0, 0, 0, 0};
+
+// Previous pin states for edge detection (per counter)
+static uint8_t counterLastState[4] = {0, 0, 0, 0};
+
+// DEBUG: Volatile counters to track ISR activity (for debugging) - detailed phase tracking
+volatile uint32_t isrCallCount[4] = {0, 0, 0, 0};
+volatile uint32_t isrCountCount[4] = {0, 0, 0, 0};
+volatile uint32_t isrDebugEnabled[4] = {0, 0, 0, 0};
+volatile uint32_t isrDebugRunning[4] = {0, 0, 0, 0};
+volatile uint32_t isrDebugPin[4] = {0, 0, 0, 0};
+volatile uint32_t isrDebugEdge[4] = {0, 0, 0, 0};
+volatile uint32_t isrDebugDebounce[4] = {0, 0, 0, 0};
+volatile uint32_t isrDebugPrescaler[4] = {0, 0, 0, 0};
+
+// DEBUG: RAW ISR trigger counters (incremented directly in ISR wrappers)
+volatile uint32_t isrRawTrigger[6] = {0, 0, 0, 0, 0, 0};  // INT0-INT5
+
+// ============================================================================
+// Valid Interrupt Pin Mapping
+// ============================================================================
+
+// Arduino Mega 2560 interrupt-capable pins
+// Use digitalPinToInterrupt() for correct mapping!
+static const uint8_t validInterruptPins[] = {2, 3, 18, 19, 20, 21};
+static const uint8_t NUM_VALID_PINS = 6;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+bool sw_counter_is_valid_interrupt_pin(uint8_t pin) {
+  for (uint8_t i = 0; i < NUM_VALID_PINS; i++) {
+    if (validInterruptPins[i] == pin) return true;
+  }
+  return false;
+}
+
+// Get Arduino interrupt number for a pin using digitalPinToInterrupt()
+// This correctly handles the pin-to-interrupt mapping for Arduino Mega 2560
+int8_t sw_counter_pin_to_interrupt(uint8_t pin) {
+  // Verify pin is valid first
+  if (!sw_counter_is_valid_interrupt_pin(pin)) {
+    return -1;  // Invalid pin
+  }
+  // Use Arduino's built-in macro for correct mapping
+  return digitalPinToInterrupt(pin);
+}
+
+// ============================================================================
+// Interrupt Handler Core Logic
+// ============================================================================
+
+void sw_counter_interrupt_handler(uint8_t counter_id) {
+  if (counter_id < 1 || counter_id > 4) return;
+
+  uint8_t idx = counter_id - 1;
+  isrCallCount[idx]++;  // DEBUG: Track ISR calls (volatile)
+
+  CounterConfig& c = counters[idx];
+
+  if (!c.enabled || c.hwMode != 0) return;  // Only SW mode
+  isrDebugEnabled[idx]++;  // Passed enabled/hwMode check
+
+  if (!c.running) return;                    // Counter must be running to count
+  isrDebugRunning[idx]++;  // Passed running check
+
+  // Read current pin state directly from the hardware pin associated with this interrupt
+  // (ignore GPIO mapping and inputIndex - ISR mode reads directly from the interrupt pin)
+  uint8_t pin = counterToInterruptPin[idx];
+  if (pin == 0) return;  // Not attached
+  isrDebugPin[idx]++;  // Passed pin attachment check
+
+  uint8_t now = digitalRead(pin) ? 1 : 0;  // Read directly from hardware pin
+  uint8_t last = counterLastState[idx];
+
+  bool fire = false;
+  uint8_t edge = c.edgeMode;
+
+  if      (edge == CNT_EDGE_RISING  && last == 0 && now == 1) fire = true;
+  else if (edge == CNT_EDGE_FALLING && last == 1 && now == 0) fire = true;
+  else if (edge == CNT_EDGE_BOTH    && last != now)           fire = true;
+
+  counterLastState[idx] = now;
+
+  if (!fire) return;
+  isrDebugEdge[idx]++;  // Passed edge detection
+
+  // Debounce check (if enabled)
+  unsigned long nowMs = millis();
+  if (c.debounceEnable && c.debounceTimeMs > 0) {
+    unsigned long dt = nowMs - c.lastEdgeMs;
+    if (dt < c.debounceTimeMs) {
+      return;  // Ignore this edge as "noise"
+    }
+    c.lastEdgeMs = nowMs;
+  } else if (fire) {
+    c.lastEdgeMs = millis();
+  }
+  isrDebugDebounce[idx]++;  // Passed debounce check
+
+  // Prescaler counter
+  uint16_t pre = (c.prescaler == 0) ? 1 : c.prescaler;
+  if (pre > 1024) pre = 1024;
+  c.edgeCount++;
+  if (c.edgeCount < pre) {
+    return;
+  }
+  c.edgeCount = 0;
+  isrDebugPrescaler[idx]++;  // Passed prescaler check
+
+  // Count step
+  uint8_t bw = c.bitWidth;
+  if (bw != 8 && bw != 16 && bw != 32 && bw != 64) bw = 32;
+
+  uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
+  bool overflow = false;
+
+  uint8_t dir = c.direction;
+  if (dir != 0) dir = 1;  // 0=UP, 1=DOWN
+
+  if (dir == 1) {  // DOWN
+    if (c.counterValue == 0) {
+      overflow = true;
+    } else {
+      c.counterValue--;
+    }
+  } else {  // UP
+    if (c.counterValue >= maxVal) {
+      overflow = true;
+    } else {
+      c.counterValue++;
+    }
+  }
+
+  isrCountCount[idx]++;  // DEBUG: Track actual count increments
+
+  if (overflow) {
+    c.overflowFlag = 1;
+    if (c.overflowReg < 160) {
+      holdingRegs[c.overflowReg] = 1;
+    }
+    // Auto-reset to startValue
+    uint64_t sv = c.startValue;
+    if (bw == 8)  sv &= 0xFFULL;
+    else if (bw == 16) sv &= 0xFFFFULL;
+    else if (bw == 32) sv &= 0xFFFFFFFFULL;
+    c.counterValue = sv;
+
+    // Reset frequency tracking on overflow
+    c.lastFreqCalcMs = 0;
+    c.lastCountForFreq = 0;
+    c.currentFreqHz = 0;
+    if (c.freqReg > 0 && c.freqReg < 160) {
+      holdingRegs[c.freqReg] = 0;
+    }
+  }
+}
+
+// ============================================================================
+// ISR Handlers - External Interrupts INT0..INT5
+// ============================================================================
+// CRITICAL: These MUST be static/global, NOT local variables!
+// Arduino's attachInterrupt() stores the function pointer, so it must remain valid
+
+static void isr_int0() {
+  isrRawTrigger[0]++;  // DEBUG: Raw trigger count
+  if (interruptToCounter[0] > 0) {
+    sw_counter_interrupt_handler(interruptToCounter[0]);
+  }
+}
+
+static void isr_int1() {
+  isrRawTrigger[1]++;  // DEBUG: Raw trigger count
+  if (interruptToCounter[1] > 0) {
+    sw_counter_interrupt_handler(interruptToCounter[1]);
+  }
+}
+
+static void isr_int2() {
+  isrRawTrigger[2]++;  // DEBUG: Raw trigger count
+  if (interruptToCounter[2] > 0) {
+    sw_counter_interrupt_handler(interruptToCounter[2]);
+  }
+}
+
+static void isr_int3() {
+  isrRawTrigger[3]++;  // DEBUG: Raw trigger count
+  if (interruptToCounter[3] > 0) {
+    sw_counter_interrupt_handler(interruptToCounter[3]);
+  }
+}
+
+static void isr_int4() {
+  isrRawTrigger[4]++;  // DEBUG: Raw trigger count
+  if (interruptToCounter[4] > 0) {
+    sw_counter_interrupt_handler(interruptToCounter[4]);
+  }
+}
+
+static void isr_int5() {
+  isrRawTrigger[5]++;  // DEBUG: Raw trigger count
+  if (interruptToCounter[5] > 0) {
+    sw_counter_interrupt_handler(interruptToCounter[5]);
+  }
+}
+
+// ============================================================================
+// Attach/Detach Interrupt
+// ============================================================================
+
+bool sw_counter_attach_interrupt(uint8_t counter_id, uint8_t pin) {
+  if (counter_id < 1 || counter_id > 4) return false;
+  if (!sw_counter_is_valid_interrupt_pin(pin)) {
+    Serial.print(F("DEBUG: attachInterrupt FAIL - invalid pin "));
+    Serial.println(pin);
+    return false;
+  }
+
+  int8_t intNum = sw_counter_pin_to_interrupt(pin);
+  if (intNum < 0 || intNum > 5) {
+    Serial.print(F("DEBUG: attachInterrupt FAIL - bad intNum "));
+    Serial.println(intNum);
+    return false;
+  }
+
+  // Check if this interrupt number is already in use by another counter
+  for (uint8_t i = 0; i < 4; i++) {
+    if (i != (counter_id - 1)) {  // Different counter
+      uint8_t otherPin = counterToInterruptPin[i];
+      if (otherPin > 0) {
+        int8_t otherInt = sw_counter_pin_to_interrupt(otherPin);
+        if (otherInt >= 0 && otherInt == intNum) {
+          Serial.print(F("DEBUG: attachInterrupt FAIL - intNum "));
+          Serial.print(intNum);
+          Serial.println(F(" already in use"));
+          return false;  // Already in use
+        }
+      }
+    }
+  }
+
+  uint8_t idx = counter_id - 1;
+
+  // Detach any previous interrupt
+  if (counterToInterruptPin[idx] > 0) {
+    int8_t oldInt = sw_counter_pin_to_interrupt(counterToInterruptPin[idx]);
+    if (oldInt >= 0 && oldInt <= 5) {
+      detachInterrupt(oldInt);
+      interruptToCounter[oldInt] = 0;
+      Serial.print(F("DEBUG: Detached old INT"));
+      Serial.println(oldInt);
+    }
+  }
+
+  // Initialize counter state
+  counterToInterruptPin[idx] = pin;
+
+  // CRITICAL: Configure pin as INPUT before attaching interrupt
+  // Arduino Mega 2560 REQUIRES pin to be INPUT for external interrupts to trigger
+  pinMode(pin, INPUT);
+
+  // Initialize counterLastState from the hardware pin (ISR mode ignores GPIO mapping)
+  counterLastState[idx] = digitalRead(pin) ? 1 : 0;
+  interruptToCounter[intNum] = counter_id;
+
+  // Attach the interrupt
+  // Use CHANGE mode to detect both rising and falling edges
+  // The edge type (rising/falling/both) is handled in the handler
+  // CRITICAL: Use static array to ensure function pointers remain valid!
+  static void (*isrs[6])() = {isr_int0, isr_int1, isr_int2, isr_int3, isr_int4, isr_int5};
+
+  attachInterrupt(intNum, isrs[intNum], CHANGE);
+
+  // DEBUG: Print interrupt register states BEFORE manual fix (AVR ATmega2560)
+  Serial.print(F("DEBUG: attachInterrupt SUCCESS - Counter "));
+  Serial.print(counter_id);
+  Serial.print(F(" attached to INT"));
+  Serial.print(intNum);
+  Serial.print(F(" (pin "));
+  Serial.print(pin);
+  Serial.println(F(")"));
+
+  Serial.print(F("DEBUG: BEFORE manual fix - EIMSK=0x"));
+  Serial.print(EIMSK, HEX);
+  Serial.print(F(" EICRB=0x"));
+  Serial.print(EICRB, HEX);
+  Serial.print(F(" EICRA=0x"));
+  Serial.print(EICRA, HEX);
+  Serial.print(F(" SREG=0x"));
+  Serial.println(SREG, HEX);
+
+  // DEBUG: Print register states after attachInterrupt
+  Serial.print(F("DEBUG: After attachInterrupt - EIMSK=0x"));
+  Serial.print(EIMSK, HEX);
+  Serial.print(F(" EICRB=0x"));
+  Serial.print(EICRB, HEX);
+  Serial.print(F(" EICRA=0x"));
+  Serial.print(EICRA, HEX);
+  Serial.print(F(" SREG=0x"));
+  Serial.println(SREG, HEX);
+
+  return true;
+}
+
+void sw_counter_detach_interrupt(uint8_t counter_id) {
+  if (counter_id < 1 || counter_id > 4) return;
+
+  uint8_t idx = counter_id - 1;
+  uint8_t pin = counterToInterruptPin[idx];
+
+  if (pin == 0) return;  // Not attached
+
+  int8_t intNum = sw_counter_pin_to_interrupt(pin);
+  if (intNum >= 0 && intNum <= 5) {
+    detachInterrupt(intNum);
+    interruptToCounter[intNum] = 0;
+  }
+
+  counterToInterruptPin[idx] = 0;
+  counterLastState[idx] = 0;
+}

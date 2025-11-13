@@ -10,7 +10,10 @@
       "Bash(git push:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nVersion v3.2.0 - Counter frequency measurement and consistent naming\n\nMajor changes:\n- NEW: Counter frequency measurement (freq-reg parameter)\n  • Automatic Hz measurement updated every second\n  • Robust timing windows (1-2 sec) with validation\n  • Handles Modbus bus activity without errors (clamping 0-20kHz)\n  • Reset on counter reset, overflow, and 5sec timeout\n  \n- NEW: Configurable raw register (raw-reg parameter)\n  • Separate register for unscaled counter value\n  • Backward compatible fallback to index-reg+4\n  \n- IMPROVED: Consistent parameter naming\n  • index-reg (prev. reg/count-reg) = scaled value\n  • raw-reg (new) = raw unscaled value\n  • freq-reg (new) = frequency in Hz\n  • overload-reg (prev. overload) = overflow flag\n  • ctrl-reg (prev. control/control-reg) = control bits\n  • input-dis (prev. input) = discrete input index\n  • CLI accepts both new and old names (backward compatibility)\n  \n- IMPROVED: CLI usability\n  • Command buffer increased to 256 chars (from 128)\n  • Support for both \"res:\" and \"resolution:\" parameter\n  • \"show counters\" table updated with new columns (ir, rr, fr, or, cr, dis, hz)\n  \n- IMPROVED: Frequency stability fixes\n  • Timing window validation (1-2 sec)\n  • Delta count validation (max 100kHz)\n  • Overflow wrap-around sanity check\n  • Result clamping (0-20000 Hz)\n  • Error recovery (5 sec timeout reset)\n  \n- EEPROM schema updated to v9 (CounterConfig with freq/raw fields)\n- Updated manual to v3.2.0 with all new features documented\n- RAM: 56.8% (4655 bytes), Flash: 20.1% (51058 bytes)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
       "Bash(git commit:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "WebFetch(domain:detailspin.com)",
+      "WebSearch",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

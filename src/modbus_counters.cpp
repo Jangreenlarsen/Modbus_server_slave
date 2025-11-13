@@ -22,6 +22,7 @@
 
 #include "modbus_counters.h"
 #include "modbus_counters_hw.h"
+#include "modbus_counters_sw_int.h"
 #include "modbus_core.h"
 #include <string.h>
 #include <math.h>
@@ -75,6 +76,33 @@ static uint8_t sanitizePrescaler(uint8_t p) {
   if (p == 0) return 1;
   if (p > 255) return 255;
   return p;
+}
+
+// Sanitize prescaler for SW/SW-ISR mode - only 1, 4, 16, 64, 256, 1024 allowed
+// These match the HW Timer5 internal prescale values for consistency
+static uint16_t sanitizePrescaler_SW(uint16_t p) {
+  // Valid prescaler values for SW/SW-ISR modes
+  if (p == 1)    return 1;     // No prescale (every edge counts)
+  if (p == 4)    return 4;     // Divide by 4
+  if (p == 16)   return 16;    // Divide by 16
+  if (p == 64)   return 64;    // Divide by 64
+  if (p == 256)  return 256;   // Divide by 256
+  if (p == 1024) return 1024;  // Divide by 1024
+  // If invalid prescaler, default to 1 (no prescale)
+  return 1;
+}
+
+// Validate prescaler for HW mode Timer5 - only 1, 8, 64, 256, 1024 are valid
+// Converts user-friendly values to internal TCCR5B clock select bits
+static uint8_t sanitizeHWPrescaler(uint8_t p) {
+  // Valid prescaler values for HW mode Timer5
+  if (p == 1) return 1;      // External clock (rising edge) - TCCR5B = 0x07
+  if (p == 8) return 3;      // /8 prescale
+  if (p == 64) return 4;     // /64 prescale
+  if (p == 256) return 5;    // /256 prescale
+  if (p == 1024) return 6;   // /1024 prescale
+  // If invalid prescaler, default to external clock (1)
+  return 1;
 }
 
 // Skaleret værdi -> holdingRegs[regIndex..] afhængig af bitWidth
@@ -172,17 +200,10 @@ static void handle_control(CounterConfig& c) {
     }
 
     // Reset HW timer if in HW mode
-    if (c.hwMode != 0) {
-      // Map hwMode to hw_counter_id
-      uint8_t hw_id = 0;
-      if (c.hwMode == 1) hw_id = 1;       // Timer1
-      else if (c.hwMode == 3) hw_id = 2;  // Timer3
-      else if (c.hwMode == 4) hw_id = 3;  // Timer4
-      else if (c.hwMode == 5) hw_id = 4;  // Timer5
-
-      if (hw_id != 0) {
-        hw_counter_reset(hw_id);
-      }
+    // Only Timer5 (hwMode=5) is supported on Arduino Mega 2560
+    if (c.hwMode == 5) {
+      uint8_t hw_id = 4;  // Timer5
+      hw_counter_reset(hw_id);
     }
 
     if (c.overflowReg < NUM_REGS) holdingRegs[c.overflowReg] = 0;
@@ -193,12 +214,39 @@ static void handle_control(CounterConfig& c) {
   // bit1: start
   if (val & 0x0002) {
     c.running = 1;
+    // Attach interrupt if in SW mode with interrupt pin configured
+    if (c.hwMode == 0 && c.interruptPin > 0) {
+      // Find counter ID from address of config struct
+      uint8_t cid = 0;
+      for (uint8_t i = 0; i < 4; i++) {
+        if (&counters[i] == &c) {
+          cid = i + 1;
+          break;
+        }
+      }
+      if (cid > 0) {
+        sw_counter_attach_interrupt(cid, c.interruptPin);
+      }
+    }
     newVal &= ~0x0002;
   }
 
   // bit2: stop
   if (val & 0x0004) {
     c.running = 0;
+    // Detach interrupt if in SW mode with interrupt pin configured
+    if (c.hwMode == 0 && c.interruptPin > 0) {
+      uint8_t cid = 0;
+      for (uint8_t i = 0; i < 4; i++) {
+        if (&counters[i] == &c) {
+          cid = i + 1;
+          break;
+        }
+      }
+      if (cid > 0) {
+        sw_counter_detach_interrupt(cid);
+      }
+    }
     newVal &= ~0x0004;
   }
 
@@ -223,7 +271,16 @@ static void handle_control(CounterConfig& c) {
 // ============================================================================
 
 void counters_init() {
+  // Initialize HW counter extension registers to 0 FIRST
+  // These are global variables that track 16-bit overflow extensions
+  hwCounter1Extend = 0;
+  hwCounter3Extend = 0;
+  hwCounter4Extend = 0;
+  hwCounter5Extend = 0;
+
   for (uint8_t i = 0; i < 4; ++i) {
+    hwOverflowCount[i] = 0;
+
     CounterConfig& c = counters[i];
     memset(&c, 0, sizeof(CounterConfig));
     c.id        = i + 1;
@@ -234,6 +291,7 @@ void counters_init() {
     c.bitWidth  = 32;
     c.prescaler = 1;
     c.inputIndex    = 0;
+    c.interruptPin  = 0;   // 0 = polling mode (no interrupt pin)
     c.regIndex      = 0;
     c.rawReg        = 0;
     c.freqReg       = 0;
@@ -262,6 +320,68 @@ void counters_init() {
 }
 
 void counters_loop() {
+  // DEBUG: Print ISR activity every second (only if counter is ISR mode)
+  static unsigned long lastDebugMs = 0;
+  unsigned long nowMs = millis();
+  bool showDebug = (nowMs - lastDebugMs) > 1000;
+  if (showDebug) {
+    lastDebugMs = nowMs;
+
+    // Print RAW ISR trigger counts (INT0-INT5)
+    Serial.print(F("DEBUG RAW ISR: INT0="));
+    Serial.print(isrRawTrigger[0]);
+    Serial.print(F(" INT1="));
+    Serial.print(isrRawTrigger[1]);
+    Serial.print(F(" INT2="));
+    Serial.print(isrRawTrigger[2]);
+    Serial.print(F(" INT3="));
+    Serial.print(isrRawTrigger[3]);
+    Serial.print(F(" INT4="));
+    Serial.print(isrRawTrigger[4]);
+    Serial.print(F(" INT5="));
+    Serial.println(isrRawTrigger[5]);
+
+    // Reset raw trigger counts
+    for (uint8_t i = 0; i < 6; i++) {
+      isrRawTrigger[i] = 0;
+    }
+
+    for (uint8_t i = 0; i < 4; i++) {
+      if (counters[i].enabled && counters[i].hwMode == 0 && counters[i].interruptPin > 0) {
+        if (isrCallCount[i] > 0 || isrCountCount[i] > 0) {
+          Serial.print(F("DEBUG ISR Counter "));
+          Serial.print(i + 1);
+          Serial.print(F(": calls="));
+          Serial.print(isrCallCount[i]);
+          Serial.print(F(" en="));
+          Serial.print(isrDebugEnabled[i]);
+          Serial.print(F(" run="));
+          Serial.print(isrDebugRunning[i]);
+          Serial.print(F(" pin="));
+          Serial.print(isrDebugPin[i]);
+          Serial.print(F(" edge="));
+          Serial.print(isrDebugEdge[i]);
+          Serial.print(F(" dbnc="));
+          Serial.print(isrDebugDebounce[i]);
+          Serial.print(F(" prsc="));
+          Serial.print(isrDebugPrescaler[i]);
+          Serial.print(F(" counts="));
+          Serial.print(isrCountCount[i]);
+          Serial.print(F(" value="));
+          Serial.println((unsigned long)(counters[i].counterValue & 0xFFFFFFFFUL));
+          isrCallCount[i] = 0;
+          isrCountCount[i] = 0;
+          isrDebugEnabled[i] = 0;
+          isrDebugRunning[i] = 0;
+          isrDebugPin[i] = 0;
+          isrDebugEdge[i] = 0;
+          isrDebugDebounce[i] = 0;
+          isrDebugPrescaler[i] = 0;
+        }
+      }
+    }
+  }
+
   for (uint8_t idx = 0; idx < 4; ++idx) {
     CounterConfig& c = counters[idx];
 
@@ -290,23 +410,20 @@ void counters_loop() {
         continue;
       }
 
-      // Map hwMode to hw_counter_id (hw_counter functions use 1=T1, 2=T3, 3=T4, 4=T5)
-      uint8_t hw_id = 0;
-      if (c.hwMode == 1) hw_id = 1;       // Timer1
-      else if (c.hwMode == 3) hw_id = 2;  // Timer3
-      else if (c.hwMode == 4) hw_id = 3;  // Timer4
-      else if (c.hwMode == 5) hw_id = 4;  // Timer5
-
-      if (hw_id == 0) {
+      // Map hwMode to hw_counter_id
+      // Only hwMode=5 (Timer5) is supported on Arduino Mega 2560
+      if (c.hwMode != 5) {
         // Invalid hwMode - skip this counter
         continue;
       }
+      uint8_t hw_id = 4;  // Timer5 only
 
       // Read HW counter value and update SW representation
       uint32_t hwValue = hw_counter_get_value(hw_id);
       c.counterValue = (uint64_t)hwValue;  // Store for output scaling
 
-      // Update frequency measurement (interrupt-based, deterministic)
+      // Update frequency measurement using dedicated function
+      // This handles first-time initialization correctly
       if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
         hw_counter_update_frequency(c.freqReg, hw_id);
       }
@@ -320,11 +437,70 @@ void counters_loop() {
     }
 
     // ====================================================================
-    // SW MODE (v3.2.0): Software polling, legacy behavior
+    // SW MODE (v3.3.0): Software polling OR interrupt-driven
     // ====================================================================
 
     // Handle control register commands
     handle_control(c);
+
+    // If counter has interrupt pin attached, skip polling
+    // ISRs will handle edge detection and counting
+    if (c.interruptPin > 0) {
+      // Interrupt-driven mode: counter updates via ISR
+      // Just reflect outputs to Modbus registers
+      if (c.overflowReg < NUM_REGS) {
+        holdingRegs[c.overflowReg] = c.overflowFlag ? 1 : 0;
+      }
+      store_value_to_regs(idx);
+
+      // Frequency calculation for SW interrupt mode (similar to polling)
+      if (c.freqReg > 0 && c.freqReg < NUM_REGS && c.running) {
+        unsigned long nowMs = millis();
+
+        // Initialize first time
+        if (c.lastFreqCalcMs == 0) {
+          c.lastFreqCalcMs = nowMs;
+          c.lastCountForFreq = c.counterValue;
+          c.currentFreqHz = 0;
+          holdingRegs[c.freqReg] = 0;
+        } else {
+          // Calculate frequency every second (1000-2000 ms window for stability)
+          unsigned long deltaTimeMs = nowMs - c.lastFreqCalcMs;
+          if (deltaTimeMs >= 1000 && deltaTimeMs <= 2000) {
+            uint64_t deltaCount = 0;
+            bool validDelta = true;
+
+            if (c.counterValue >= c.lastCountForFreq) {
+              deltaCount = c.counterValue - c.lastCountForFreq;
+            } else {
+              // Handle overflow wrap-around
+              uint8_t bw = sanitizeBitWidth(c.bitWidth);
+              uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
+              deltaCount = (maxVal - c.lastCountForFreq) + c.counterValue + 1;
+              if (deltaCount > maxVal / 2) {
+                validDelta = false;
+              }
+            }
+
+            if (validDelta && deltaCount <= 100000UL) {
+              uint32_t freqCalc = (uint32_t)((deltaCount * 1000UL) / deltaTimeMs);
+              if (freqCalc > 20000UL) freqCalc = 20000UL;
+              c.currentFreqHz = (uint16_t)freqCalc;
+            }
+
+            holdingRegs[c.freqReg] = c.currentFreqHz;
+            c.lastCountForFreq = c.counterValue;
+            c.lastFreqCalcMs = nowMs;
+          } else if (deltaTimeMs > 5000) {
+            c.lastFreqCalcMs = nowMs;
+            c.lastCountForFreq = c.counterValue;
+            c.currentFreqHz = 0;
+            holdingRegs[c.freqReg] = 0;
+          }
+        }
+      }
+      continue;
+    }
 
     // If not running -> track lastLevel, but don't count
     bool lvl = di_read(c.inputIndex);
@@ -542,7 +718,20 @@ bool counters_config_set(uint8_t id, const CounterConfig& src) {
   c.edgeMode  = sanitizeEdge(c.edgeMode);
   c.direction = sanitizeDirection(c.direction);
   c.bitWidth  = sanitizeBitWidth(c.bitWidth);
-  c.prescaler = sanitizePrescaler(c.prescaler);
+
+  // Validate prescaler based on mode (HW vs SW)
+  // HW mode (hwMode=5) only supports: 1 (external), 8, 64, 256, 1024
+  // SW/SW-ISR modes now use: 1, 4, 16, 64, 256, 1024 (unified with HW)
+  if (c.hwMode == 5) {
+    // HW mode Timer5 - only specific prescaler values
+    c.prescaler = sanitizeHWPrescaler(c.prescaler);
+  } else if (c.hwMode == 0) {
+    // SW/SW-ISR mode - unified prescaler values (1, 4, 16, 64, 256, 1024)
+    c.prescaler = sanitizePrescaler_SW(c.prescaler);
+  } else {
+    // Unknown mode - default to 1
+    c.prescaler = 1;
+  }
 
   if (c.inputIndex >= NUM_DISCRETE) c.inputIndex = 0;
 
@@ -576,17 +765,22 @@ c.lastEdgeMs = 0;
   counters[idx] = c;
 
   // Initialize HW timer if in HW mode
+  // CRITICAL: Arduino Mega 2560 hardware limitation - ONLY Timer5 (pin 47) has external clock input routed to headers!
+  // Timer1, Timer3, Timer4 external clock inputs are NOT accessible on the board.
+  // See: https://forum.arduino.cc/t/external-input-to-timer-counter-modules-on-arduino-mega-2560-adk/275652
   if (c.enabled && c.hwMode != 0) {
-    // Map hwMode to hw_counter_id (hw_counter functions use 1=T1, 2=T3, 3=T4, 4=T5)
-    uint8_t hw_id = 0;
-    uint8_t pin = 0;
+    if (c.hwMode != 5) {
+      // Timer1, Timer3, Timer4 are not supported for HW mode on Arduino Mega 2560
+      c.hwMode = 0;  // Force to SW mode
+      Serial.print(F("WARNING: Counter "));
+      Serial.print(c.id);
+      Serial.println(F(" HW mode not supported (only Timer5/pin47 available). Using SW mode instead."));
+    } else {
+      // Only Timer5 (hwMode=5) is supported - Pin 47 (PL2/T5)
+      uint8_t hw_id = 4;  // Timer5
+      uint8_t pin = 47;   // Pin 47 (PL2/T5) - ONLY external clock input on Arduino Mega 2560
 
-    if (c.hwMode == 1) { hw_id = 1; pin = 5; }       // Timer1 = pin 5 (D5/T1)
-    else if (c.hwMode == 3) { hw_id = 2; pin = 47; } // Timer3 = pin 47 (D47/T3)
-    else if (c.hwMode == 4) { hw_id = 3; pin = 6; }  // Timer4 = pin 6 (D6/T4)
-    else if (c.hwMode == 5) { hw_id = 4; pin = 46; } // Timer5 = pin 46 (D46/T5)
-
-    if (hw_id != 0) {
+      if (hw_id != 0) {
       // Check for GPIO conflicts and remove STATIC mappings
       if (pin > 0) {
         gpio_handle_dynamic_conflict(pin);
@@ -599,10 +793,61 @@ c.lastEdgeMs = 0;
         pinMode(pin, INPUT);
       }
 
-      // Initialize HW timer with prescaler mode
+      // Initialize HW timer with prescaler mode and start value
       // prescaler field is used as mode for HW: 1=external clock, 2-5=internal prescale
-      hw_counter_init(hw_id, c.prescaler);
+      // Pass the startValue (properly masked to bitWidth) as the initial counter value
+      uint32_t hw_start_value = (uint32_t)(sv & 0xFFFFFFFFUL);
+      hw_counter_init(hw_id, c.prescaler, hw_start_value);
+      }
     }
+  }
+
+  // ============================================================================
+  // SW-ISR Mode Validation (hwMode=0 + interruptPin > 0)
+  // ============================================================================
+  // NOTE: SW-ISR mode reads DIRECTLY from the interrupt pin hardware
+  // It ignores GPIO mapping and inputIndex parameter - those are only for SW polling mode
+  if (c.hwMode == 0 && c.enabled && c.interruptPin > 0) {
+    Serial.print(F("DEBUG: counters_config_set - validating SW-ISR for counter "));
+    Serial.print(id);
+    Serial.print(F(", interruptPin="));
+    Serial.println(c.interruptPin);
+
+    // Validate interrupt pin is supported
+    if (!sw_counter_is_valid_interrupt_pin(c.interruptPin)) {
+      Serial.print(F("ERROR: Counter "));
+      Serial.print(id);
+      Serial.print(F(" - invalid interrupt pin "));
+      Serial.print(c.interruptPin);
+      Serial.println(F(" (must be 2, 3, 18, 19, 20, or 21)"));
+      return false;
+    }
+
+    // SW-ISR mode does NOT require GPIO mapping - it reads directly from the interrupt pin
+    Serial.print(F("DEBUG: Counter "));
+    Serial.print(id);
+    Serial.println(F(" configured for SW-ISR mode (ignores GPIO mapping and input-dis)"));
+  }
+
+  // Attach/Detach SW-mode interrupt
+  // Only for SW mode (hwMode == 0) with a valid interrupt pin
+  if (c.hwMode == 0) {
+    if (c.enabled && c.interruptPin > 0) {
+      // Attach interrupt for enabled SW-mode counter with interrupt pin configured
+      Serial.print(F("DEBUG: counters_config_set calling attach for counter "));
+      Serial.println(id);
+      sw_counter_attach_interrupt(id, c.interruptPin);
+    } else {
+      // Detach interrupt if: counter disabled, HW mode changed, or polling mode set
+      Serial.print(F("DEBUG: counters_config_set calling detach for counter "));
+      Serial.println(id);
+      sw_counter_detach_interrupt(id);
+    }
+  } else {
+    // HW-mode or other: always detach any SW interrupt (in case of mode transition)
+    Serial.print(F("DEBUG: counters_config_set HW-mode, detaching counter "));
+    Serial.println(id);
+    sw_counter_detach_interrupt(id);
   }
 
   // Nulstil overflowReg & skriv initial værdi
@@ -642,16 +887,12 @@ void counters_reset(uint8_t id) {
   }
 
   // Reset HW timer if in HW mode
-  if (c.hwMode != 0) {
-    uint8_t hw_id = 0;
-    if (c.hwMode == 1) hw_id = 1;       // Timer1
-    else if (c.hwMode == 3) hw_id = 2;  // Timer3
-    else if (c.hwMode == 4) hw_id = 3;  // Timer4
-    else if (c.hwMode == 5) hw_id = 4;  // Timer5
-
-    if (hw_id != 0) {
-      hw_counter_reset(hw_id);
-    }
+  // Only Timer5 (hwMode=5) is supported on Arduino Mega 2560
+  if (c.hwMode == 5) {
+    uint8_t hw_id = 4;  // Timer5
+    // Reset HW timer to the configured startValue (not just to 0)
+    uint32_t hw_start_value = (uint32_t)(sv & 0xFFFFFFFFUL);
+    hw_counter_init(hw_id, c.prescaler, hw_start_value);
   }
 
   if (c.overflowReg < NUM_REGS) {
@@ -675,7 +916,7 @@ void counters_print_status() {
   Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------------"));
   Serial.println(F("co = count-on, sv = startValue, res = resolution, ps = prescaler, ir = index-reg, rr = raw-reg, fr = freq-reg"));
   Serial.println(F("or = overload-reg, cr = ctrl-reg, dir = direction, sf = scaleFloat, dis = input-dis, d = debounce, dt = debounce-ms"));
-  Serial.println(F("hw = HW/SW mode (SW|T1|T3|T4|T5), pin = GPIO pin (actual hardware pin), hz = measured freq (Hz)"));
+  Serial.println(F("hw = HW/SW mode (SW|ISR|T1|T3|T4|T5), pin = GPIO pin (actual hardware pin), hz = measured freq (Hz)"));
   Serial.println(F("value = scaled value, raw = raw counter value"));
   Serial.println(F("----------------------------------------------------------------------------------------------------------------------------------------------"));
   Serial.println(F("counter | mode| hw  | pin  | co     | sv       | res | ps   | ir   | rr   | fr   | or   | cr   | dir   | sf     | d   | dt   | hz    | value     | raw"));
@@ -689,9 +930,11 @@ void counters_print_status() {
     const char* dirStr = (c.direction==CNT_DIR_DOWN)?"down":"up";
     const char* dStr = c.debounceEnable?"on":"off";
 
-    // HW mode display: SW, T1, T3, T4, T5
+    // HW mode display: SW, ISR, T1, T3, T4, T5 (v3.4.0 refactored)
     const char* hwStr = "SW";
-    if (c.hwMode == 1) hwStr = "T1";
+    if (c.hwMode == 0 && c.interruptPin > 0) {
+      hwStr = "ISR";  // Software Interrupt mode
+    } else if (c.hwMode == 1) hwStr = "T1";
     else if (c.hwMode == 3) hwStr = "T3";
     else if (c.hwMode == 4) hwStr = "T4";
     else if (c.hwMode == 5) hwStr = "T5";
@@ -704,7 +947,7 @@ void counters_print_status() {
     Serial.print(' ');
     sprintf(buf, "%-7d| ", i+1);       Serial.print(buf);
     sprintf(buf, "%-4d| ", mode);      Serial.print(buf);
-    sprintf(buf, "%-4s| ", hwStr);     Serial.print(buf);  // HW mode: SW|T1|T3|T4|T5
+    sprintf(buf, "%-4s| ", hwStr);     Serial.print(buf);  // HW mode: SW|ISR|T1|T3|T4|T5
 
     // Pin display: show actual GPIO pin
     if (c.hwMode != 0) {
@@ -715,8 +958,11 @@ void counters_print_status() {
       else if (c.hwMode == 4) gpioPin = 6;
       else if (c.hwMode == 5) gpioPin = 46;
       sprintf(buf, "%-5d| ", gpioPin);
+    } else if (c.hwMode == 0 && c.interruptPin > 0) {
+      // SW-ISR mode: show interrupt pin directly
+      sprintf(buf, "%-5d| ", c.interruptPin);
     } else {
-      // SW mode: find GPIO pin mapped to this discrete input
+      // SW polling mode: find GPIO pin mapped to this discrete input
       int16_t gpioPin = -1;
       for (uint8_t pin = 0; pin < NUM_GPIO; pin++) {
         if (gpioToInput[pin] == (int16_t)c.inputIndex) {
@@ -751,7 +997,18 @@ void counters_print_status() {
 
     sprintf(buf, "%-4s| ", dStr); Serial.print(buf);
     sprintf(buf, "%-5d| ", c.debounceTimeMs); Serial.print(buf);
-    sprintf(buf, "%-6d| ", c.currentFreqHz); Serial.print(buf);  // hz = measured frequency
+
+    // Read frequency from correct source (HW mode reads from register, SW mode from variable)
+    uint16_t displayFreq = 0;
+    if (c.hwMode != 0 && c.freqReg > 0 && c.freqReg < NUM_REGS) {
+      // HW mode: read from holdingRegs (written by hw_counter_update_frequency)
+      displayFreq = holdingRegs[c.freqReg];
+    } else {
+      // SW mode: read from counter variable
+      displayFreq = c.currentFreqHz;
+    }
+    sprintf(buf, "%-6d| ", displayFreq); Serial.print(buf);  // hz = measured frequency
+
     sprintf(buf, "%-10lu| ", val); Serial.print(buf);
     sprintf(buf, "%-10lu", raw); Serial.println(buf);
   }

@@ -82,6 +82,8 @@
 
 
 #include "modbus_counters.h"
+#include "modbus_counters_hw.h"
+#include "modbus_counters_sw_int.h"
 #include "modbus_core.h"
 #include "modbus_globals.h"
 #include "modbus_timers.h"
@@ -435,17 +437,28 @@ static void print_counters_config_block(bool onlyEnabled) {
 
     Serial.print(F(" hw-mode="));
     if (c.hwMode == 0) {
-      Serial.print(F("SW"));
+      // SW mode: either polling (interruptPin==0) or ISR (interruptPin>0)
+      if (c.interruptPin > 0) {
+        Serial.print(F("sw-isr"));
+      } else {
+        Serial.print(F("sw"));
+      }
     } else if (c.hwMode == 1) {
-      Serial.print(F("HW-T1"));
+      Serial.print(F("hw-t1"));
     } else if (c.hwMode == 3) {
-      Serial.print(F("HW-T3"));
+      Serial.print(F("hw-t3"));
     } else if (c.hwMode == 4) {
-      Serial.print(F("HW-T4"));
+      Serial.print(F("hw-t4"));
     } else if (c.hwMode == 5) {
-      Serial.print(F("HW-T5"));
+      Serial.print(F("hw-t5"));
     } else {
-      Serial.print(F("HW-UNKNOWN"));
+      Serial.print(F("unknown"));
+    }
+
+    // Show interrupt-pin for SW-ISR mode
+    if (c.hwMode == 0 && c.interruptPin > 0) {
+      Serial.print(F(" interrupt-pin="));
+      Serial.print(c.interruptPin);
     }
 
     Serial.println();
@@ -497,6 +510,10 @@ static void print_gpio_config_block() {
   for (uint8_t pin = 0; pin < MAX_GPIO_PINS; ++pin) {
     int16_t ci = gpioToCoil[pin];
     int16_t di = gpioToInput[pin];
+
+    // Skip pins with no mapping (both -1 = unmapped)
+    if (ci == -1 && di == -1) continue;
+
     if (ci != -1) {
       any = true;
       Serial.print(F("  gpio ")); Serial.print(pin);
@@ -710,7 +727,19 @@ static void cmd_show(uint8_t ntok, char* tok[]) {
       }
       Serial.println(F("=============================="));
     }
-    
+
+    // DEBUG: Show HW counter extension register values
+    Serial.println(F("=== DEBUG HW COUNTER STATE ==="));
+    Serial.print(F("hwCounter1Extend: ")); Serial.println(hwCounter1Extend);
+    Serial.print(F("hwCounter3Extend: ")); Serial.println(hwCounter3Extend);
+    Serial.print(F("hwCounter4Extend: ")); Serial.println(hwCounter4Extend);
+    Serial.print(F("hwCounter5Extend: ")); Serial.println(hwCounter5Extend);
+    Serial.print(F("TCNT1: ")); Serial.println(TCNT1);
+    Serial.print(F("TCNT3: ")); Serial.println(TCNT3);
+    Serial.print(F("TCNT4: ")); Serial.println(TCNT4);
+    Serial.print(F("TCNT5: ")); Serial.println(TCNT5);
+    Serial.println(F("=============================="));
+
     return; 
   }
   if (!strcmp(tok[1],"GPIO"))         { cli_show_gpio();   return; }
@@ -1150,14 +1179,16 @@ uint8_t start = 5;
       continue;
     }
 
-    // prescaler:<1..256>
+    // prescaler:<1|4|16|64|256|1024> - unified HW/SW prescaler values
     if (!strncasecmp(p, "prescaler:", 10)) {
       uint16_t pre = (uint16_t)strtoul(p + 10, nullptr, 10);
-      if (pre < 1 || pre > 256) {
-        Serial.println(F("% Invalid prescaler (1..256)"));
+      // Validate: only 1, 4, 16, 64, 256, 1024 allowed
+      if (pre == 1 || pre == 4 || pre == 16 || pre == 64 || pre == 256 || pre == 1024) {
+        cfg.prescaler = pre;
+      } else {
+        Serial.println(F("% Invalid prescaler (use: 1|4|16|64|256|1024)"));
         return;
       }
-      cfg.prescaler = (uint8_t)pre;
       continue;
     }
 
@@ -1285,24 +1316,43 @@ uint8_t start = 5;
       continue;
     }
 
-    // hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5> (NEW v3.3.0 with timer selection)
+    // hw-mode:<sw|sw-isr|hw-t5> (v3.4.0 refactored)
+    // sw = software polling mode (interruptPin=0)
+    // sw-isr = software interrupt mode (requires separate interrupt-pin parameter)
+    // hw-t5 = hardware Timer5 mode (Pin 46/T5)
     if (!strncasecmp(p, "hw-mode:", 8)) {
       const char* v = p + 8;
       if (!strcasecmp(v, "sw") || !strcasecmp(v, "0")) {
-        cfg.hwMode = 0;  // Software mode
-      } else if (!strcasecmp(v, "hw") || !strcasecmp(v, "1")) {
-        cfg.hwMode = 1;  // Hardware mode - legacy (defaults to Timer1)
-      } else if (!strcasecmp(v, "hw-t1")) {
-        cfg.hwMode = 1;  // Hardware Timer1 (Pin 5/T1)
-        // inputIndex is discrete input, NOT GPIO - user must specify via input-dis
-      } else if (!strcasecmp(v, "hw-t3")) {
-        cfg.hwMode = 3;  // Hardware Timer3 (Pin 47/T3)
-      } else if (!strcasecmp(v, "hw-t4")) {
-        cfg.hwMode = 4;  // Hardware Timer4 (Pin 6/T4)
+        cfg.hwMode = 0;  // Software polling mode
+        cfg.interruptPin = 0;  // Ensure polling
+      } else if (!strcasecmp(v, "sw-isr")) {
+        cfg.hwMode = 0;  // Software ISR mode (requires interrupt-pin parameter)
+        // interruptPin will be set via separate interrupt-pin parameter
       } else if (!strcasecmp(v, "hw-t5")) {
         cfg.hwMode = 5;  // Hardware Timer5 (Pin 46/T5)
+      } else if (!strcasecmp(v, "hw-t1") || !strcasecmp(v, "hw-t3") || !strcasecmp(v, "hw-t4")
+                 || !strcasecmp(v, "hw") || !strcasecmp(v, "1") || !strcasecmp(v, "3") || !strcasecmp(v, "4")) {
+        // Legacy mode names - not supported on Arduino Mega 2560 (only Timer5 has external clock routed)
+        Serial.println(F("% HW mode not supported (only hw-t5 available). Use sw or sw-isr instead."));
+        return;
       } else {
-        Serial.println(F("% Invalid hw-mode (use sw|hw-t1|hw-t3|hw-t4|hw-t5)"));
+        Serial.println(F("% Invalid hw-mode (use: sw|sw-isr|hw-t5)"));
+        return;
+      }
+      continue;
+    }
+
+    // interrupt-pin:<pin> (NEW v3.3.0 - SW mode only)
+    // Valid pins: 2, 3, 18, 19, 20, 21 (external interrupts on Arduino Mega 2560)
+    if (!strncasecmp(p, "interrupt-pin:", 14)) {
+      uint8_t pin = (uint8_t)strtoul(p + 14, nullptr, 10);
+      if (pin == 0) {
+        // 0 = disable interrupt mode, use polling
+        cfg.interruptPin = 0;
+      } else if (sw_counter_is_valid_interrupt_pin(pin)) {
+        cfg.interruptPin = pin;
+      } else {
+        Serial.println(F("% Invalid interrupt pin (use 0 for polling, or 2/3/18/19/20/21)"));
         return;
       }
       continue;
@@ -1373,6 +1423,31 @@ static void cmd_set(uint8_t ntok, char* tok[]) {
     }
     return;
   }
+
+// --- Fjern en counter: "no set counter <id>" ---
+if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "COUNTER")) {
+  if (ntok < 4) {
+    Serial.println(F("Usage: no set counter <id>"));
+    return;
+  }
+  uint8_t id = (uint8_t)strtoul(tok[3], nullptr, 10);
+  if (id < 1 || id > 4) {
+    Serial.println(F("% Invalid counter id (1..4)"));
+    return;
+  }
+  CounterConfig c;
+  if (!counters_get(id, c)) {
+    Serial.println(F("% Counter read error"));
+    return;
+  }
+  c.enabled = 0;
+  if (!counters_config_set(id, c)) {
+    Serial.println(F("% Could not disable counter"));
+    return;
+  }
+  Serial.print(F("Counter ")); Serial.print(id); Serial.println(F(" removed from configuration"));
+  return;
+}
 
 // --- Fjern et statisk register: "no set reg static <addr>" ---
 if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "REG") && !strcmp(tok[3], "STATIC")) {
@@ -1615,31 +1690,6 @@ if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "COIL") &
 
   // ---------------- COUNTER ----------------
   if (!strcmp(tok[1], "COUNTER")) {
-    // "no set counter <id>" for at disable/slette counter
-    if (!strcmp(tok[0], "NO")) {
-      if (ntok < 3) {
-        Serial.println(F("Usage: no set counter <id>"));
-        return;
-      }
-      uint8_t id = (uint8_t)strtoul(tok[2], nullptr, 10);
-      if (id < 1 || id > 4) {
-        Serial.println(F("% Invalid counter id (1..4)"));
-        return;
-      }
-      CounterConfig c;
-      if (!counters_get(id, c)) {
-        Serial.println(F("% Counter read error"));
-        return;
-      }
-      c.enabled = 0;
-      if (!counters_config_set(id, c)) {
-        Serial.println(F("% Could not disable counter"));
-        return;
-      }
-      Serial.print(F("Counter ")); Serial.print(id); Serial.println(F(" removed from configuration"));
-      return;
-    }
-
     // "set counter <id> reset-on-read ENABLE/DISABLE"
     if (ntok >= 4 && !strcasecmp(tok[3], "reset-on-read")) {
       if (ntok < 5) {
@@ -1810,13 +1860,23 @@ static void cmd_persist(const char* verb) {
     // Use global config to avoid stack overflow
     memset(&globalConfig, 0, sizeof(globalConfig));
     globalConfig.magic      = 0xC0DE;
-    globalConfig.schema     = 6;   // schema v6 for CounterEngine v3 (+ debounce)
+    globalConfig.schema     = 11;  // v11: GPIO mappings removed from persistence
     globalConfig.reserved   = 0;
     globalConfig.slaveId    = currentSlaveID;
     globalConfig.serverFlag = serverRunning ? 1 : 0;
     globalConfig.baud       = currentBaudrate;
     globalConfig.timerStatusReg     = timerStatusRegIndex;
     globalConfig.timerStatusCtrlReg = timerStatusCtrlRegIndex;
+
+    // Hostname
+    strncpy(globalConfig.hostname, cliHostname, sizeof(globalConfig.hostname));
+    globalConfig.hostname[sizeof(globalConfig.hostname)-1] = '\0';
+
+    // Counter control flags (will be saved by configSave())
+    for (uint8_t i = 0; i < 4; i++) {
+      globalConfig.counterResetOnReadEnable[i] = counterResetOnReadEnable[i];
+      globalConfig.counterAutoStartEnable[i] = counterAutoStartEnable[i];
+    }
 
     // statiske maps
     globalConfig.regStaticCount  = regStaticCount;
@@ -1830,10 +1890,12 @@ static void cmd_persist(const char* verb) {
       globalConfig.coilStaticVal[i] = coilStaticVal[i] ? 1 : 0;
     }
 
-    // timere: gem alle 4 (nulstil runtime-felter først)
-    globalConfig.timerCount = 4;
+    // timere: gem og tæl kun enabled
+    globalConfig.timerCount = 0;
     for (uint8_t i = 0; i < 4; i++) {
       globalConfig.timer[i] = timers[i];
+      if (timers[i].enabled) globalConfig.timerCount++;
+
       // Nulstil runtime-felter som IKKE skal gemmes
       globalConfig.timer[i].active = 0;
       globalConfig.timer[i].phase = 0;
@@ -1844,10 +1906,12 @@ static void cmd_persist(const char* verb) {
       globalConfig.timer[i].lastDurationMs = 0;
     }
 
-    // Counters: gem alle 4 (nulstil runtime-felter først)
-    globalConfig.counterCount = 4;
+    // Counters: gem og tæl kun enabled
+    globalConfig.counterCount = 0;
     for (uint8_t i = 0; i < 4; i++) {
       globalConfig.counter[i] = counters[i];
+      if (counters[i].enabled) globalConfig.counterCount++;
+
       // Nulstil runtime-felter som IKKE skal gemmes
       globalConfig.counter[i].counterValue = globalConfig.counter[i].startValue;
       globalConfig.counter[i].edgeCount = 0;
@@ -1859,11 +1923,8 @@ static void cmd_persist(const char* verb) {
       globalConfig.counter[i].currentFreqHz = 0;
     }
 
-    // gem GPIO mapping
-    for (uint8_t i = 0; i < NUM_GPIO; i++) {
-      globalConfig.gpioToCoil[i]  = gpioToCoil[i];
-      globalConfig.gpioToInput[i] = gpioToInput[i];
-    }
+    // NOTE: GPIO mappings no longer saved (v3.3.1)
+    // HW counters auto-map their pins, static mappings are runtime-only
 
     if (configSave(globalConfig)) Serial.println(F("OK: config saved to EEPROM"));
     else                          Serial.println(F("% Save failed"));
@@ -1902,11 +1963,12 @@ static void help_counters() {
   Serial.println();
   Serial.println(F(" Configuration:"));
   Serial.println(F(" set counter <id> mode 1 parameter count-on:<rising|falling|both>"));
-  Serial.println(F("   start-value:<n> res|resolution:<8|16|32|64> prescaler:<1..256>"));
+  Serial.println(F("   start-value:<n> res|resolution:<8|16|32|64> prescaler:<1|4|16|64|256|1024>"));
   Serial.println(F("   index-reg:<reg> raw-reg:<reg> freq-reg:<reg> ctrl-reg:<reg> overload-reg:<reg>"));
   Serial.println(F("   input-dis:<di_idx> direction:<up|down> scale:<float>"));
   Serial.println(F("   debounce:<on|off> [debounce-ms:<ms>]"));
-  Serial.println(F("   hw-mode:<sw|hw-t1|hw-t3|hw-t4|hw-t5> [select HW timer]"));
+  Serial.println(F("   hw-mode:<sw|sw-isr|hw-t5> [polling|interrupt|hardware mode]"));
+  Serial.println(F("   interrupt-pin:<2|3|18|19|20|21> [required for sw-isr mode]"));
   Serial.println();
   Serial.println(F(" Control:"));
   Serial.println(F(" set counter <id> reset-on-read ENABLE|DISABLE"));
@@ -1923,6 +1985,15 @@ static void help_counters() {
   Serial.println(F("  bit2 = stop   (stop counting)"));
   Serial.println(F("  bit3 = reset-on-read enable (sticky - saved to EEPROM)"));
   Serial.println(F("  NOTE: All bits writable via Modbus FC6, but only bit3 persists"));
+  Serial.println();
+  Serial.println(F(" -- Interrupt Pins (SW mode only): --"));
+  Serial.println(F("  0  = Polling mode (software edge detection - can lose counts during CLI)"));
+  Serial.println(F("  2  = INT4 (hardware interrupt - never loses counts)"));
+  Serial.println(F("  3  = INT5 (hardware interrupt - never loses counts)"));
+  Serial.println(F("  18 = INT3 (hardware interrupt - never loses counts)"));
+  Serial.println(F("  19 = INT2 (hardware interrupt - never loses counts)"));
+  Serial.println(F("  20 = INT1 (hardware interrupt - never loses counts)"));
+  Serial.println(F("  21 = INT0 (hardware interrupt - never loses counts)"));
   Serial.println();
   Serial.println(F(" -- Register configuration notes: --"));
   Serial.println(F("  index-reg:  scaled output register (uses 1/2/4 regs for 8/16/32/64-bit)"));

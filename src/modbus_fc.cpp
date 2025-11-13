@@ -125,7 +125,7 @@ static void fc_write_single_reg(uint8_t rxSlave,uint8_t* f){
 
     // Byg aktuel config (samme som CLI SAVE)
     cfg.magic      = 0xC0DE;
-    cfg.schema     = 7;  // Opdateret til schema 7
+    cfg.schema     = 11;  // v11: GPIO mappings removed from persistence
     cfg.slaveId    = currentSlaveID;
     cfg.serverFlag = serverRunning ? 1 : 0;
     cfg.baud       = currentBaudrate;
@@ -144,23 +144,21 @@ static void fc_write_single_reg(uint8_t rxSlave,uint8_t* f){
       cfg.coilStaticVal[i] = coilStaticVal[i];
     }
 
-    // Timere
-    cfg.timerCount = 4;
+    // Timere - tæl enabled
+    cfg.timerCount = 0;
     for (uint8_t i = 0; i < 4; i++) {
       cfg.timer[i] = timers[i];
+      if (timers[i].enabled) cfg.timerCount++;
     }
 
-    // Counters
-    cfg.counterCount = 4;
+    // Counters - tæl enabled
+    cfg.counterCount = 0;
     for (uint8_t i = 0; i < 4; i++) {
       cfg.counter[i] = counters[i];
+      if (counters[i].enabled) cfg.counterCount++;
     }
 
-    // GPIO-mapping
-    for (uint8_t i = 0; i < NUM_GPIO; i++) {
-      cfg.gpioToCoil[i]  = gpioToCoil[i];
-      cfg.gpioToInput[i] = gpioToInput[i];
-    }
+    // NOTE: GPIO mappings no longer saved (v3.3.1)
 
     if (configSave(cfg)) {
       Serial.println(F("AUTO-SAVE: Konfiguration gemt til EEPROM (via reg0=0xFF)"));
@@ -227,7 +225,7 @@ static void fc_write_multiple_regs(uint8_t rxSlave,uint8_t* f){
 
       // Byg aktuel konfiguration (samme som CLI SAVE)
       cfg.magic      = 0xC0DE;
-      cfg.schema     = 7;  // Opdateret til schema 7
+      cfg.schema     = 11;  // v11: GPIO mappings removed from persistence
       cfg.slaveId    = currentSlaveID;
       cfg.serverFlag = serverRunning ? 1 : 0;
       cfg.baud       = currentBaudrate;
@@ -246,23 +244,21 @@ static void fc_write_multiple_regs(uint8_t rxSlave,uint8_t* f){
         cfg.coilStaticVal[j] = coilStaticVal[j];
       }
 
-      // Timere
-      cfg.timerCount = 4;
+      // Timere - tæl enabled
+      cfg.timerCount = 0;
       for (uint8_t j = 0; j < 4; j++) {
         cfg.timer[j] = timers[j];
+        if (timers[j].enabled) cfg.timerCount++;
       }
 
-      // Counters
-      cfg.counterCount = 4;
+      // Counters - tæl enabled
+      cfg.counterCount = 0;
       for (uint8_t j = 0; j < 4; j++) {
         cfg.counter[j] = counters[j];
+        if (counters[j].enabled) cfg.counterCount++;
       }
 
-      // GPIO mapping
-      for (uint8_t j = 0; j < NUM_GPIO; j++) {
-        cfg.gpioToCoil[j]  = gpioToCoil[j];
-        cfg.gpioToInput[j] = gpioToInput[j];
-      }
+      // NOTE: GPIO mappings no longer saved (v3.3.1)
 
       if (configSave(cfg))
         Serial.println(F("AUTO-SAVE: Konfiguration gemt til EEPROM (via FC16 reg0=0xFF)"));
@@ -338,12 +334,7 @@ void initModbus() {
   timers_init();
   counters_init();
 
-  // Nulstil GPIO-mapping
-  for (int p = 0; p < NUM_GPIO; ++p) {
-    gpioToCoil[p]  = -1;
-    gpioToInput[p] = -1;
-  }
-
+  // NOTE: GPIO-mapping initialization removed - it's now done by configApply() in main.cpp
   // Config loading and apply is done in main.cpp setup() before calling initModbus()
   // This avoids double-loading and prevents stack overflow from local PersistConfig
 }

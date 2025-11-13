@@ -34,9 +34,10 @@ extern volatile uint16_t hwOverflowCount[4];          // Overflow count per coun
 // ============================================================================
 
 // Initialize HW timer for counter (id = 1..4 -> Timer1/3/4/5)
-// prescaler: 0=no clock, 1=external clock (rising edge), 8/64/256/1024 for internal
+// mode: 0=no clock, 1=external clock (rising edge), 8/64/256/1024 for internal
+// start_value: initial value to set the counter to (default 0)
 // Returns true if successful, false if id invalid
-bool hw_counter_init(uint8_t counter_id, uint8_t mode);
+bool hw_counter_init(uint8_t counter_id, uint8_t mode, uint32_t start_value = 0);
 
 // Get combined counter value (extension + TCNT register)
 // Returns 32-bit value combining HW counter overflow extension + current count

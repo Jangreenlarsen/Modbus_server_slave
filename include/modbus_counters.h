@@ -51,7 +51,7 @@ enum CounterDirection : uint8_t {
 };
 
 // ============================================================================
-//  CounterConfig v4 (schema v10) - v3.3.0
+//  CounterConfig v5 (schema v11) - v3.3.0
 // ============================================================================
 //
 //  Felter:
@@ -62,7 +62,8 @@ enum CounterDirection : uint8_t {
 //   direction      : CNT_DIR_UP / CNT_DIR_DOWN
 //   bitWidth       : 8 / 16 / 32 / 64 (intern maske / antal ud-regs)
 //   prescaler      : antal edges pr. tællerskridt (1..256) eller HW prescale mode
-//   inputIndex     : discrete input index (0..NUM_DISCRETE-1) [SW mode]
+//   inputIndex     : discrete input index (0..NUM_DISCRETE-1) [SW polling mode]
+//   interruptPin   : GPIO pin for interrupt mode (0=polling, 2/3/18/19/20/21=interrupt) [SW mode only]
 //   regIndex       : base holding register for skaleret værdi
 //   controlReg     : holding-reg med bitmask (bit0=reset,1=start,2=stop)
 //   overflowReg    : holding-reg hvor overflowFlag spejles (0/1)
@@ -71,7 +72,7 @@ enum CounterDirection : uint8_t {
 //   counterValue   : rå tællerværdi (før scaling) [SW mode]
 //   running        : 0/1 (kun aktiv når enabled && running)
 //   overflowFlag   : 0/1 (sættes ved overflow / underflow)
-//   lastLevel      : sidste input-niveau (edge detect) [SW mode]
+//   lastLevel      : sidste input-niveau (edge detect) [SW polling mode]
 //   edgeCount      : rå edge-counter til prescaler [SW mode]
 //   debounceEnable : 0/1 – aktiverer debounce på input [SW mode]
 //   debounceTimeMs : debounce-vindue i millisekunder [SW mode]
@@ -86,8 +87,9 @@ struct CounterConfig {
   uint8_t   direction;   // CounterDirection (0=UP,1=DOWN)
 
   uint8_t   bitWidth;    // 8/16/32/64
-  uint8_t   prescaler;   // SW: 1..256 (edges per step) | HW: 0=off, 1=ext-clock, 2-6=prescale
-  uint16_t  inputIndex;  // discrete input index (SW mode only)
+  uint16_t  prescaler;   // SW/SW-ISR: 1|4|16|64|256|1024 | HW: 0=off, 1=ext-clock, 2-6=prescale
+  uint16_t  inputIndex;  // discrete input index (SW polling mode only)
+  uint8_t   interruptPin; // GPIO pin for SW interrupt mode (0=polling, 2/3/18/19/20/21=interrupt)
 
   uint16_t  regIndex;    // base holding register for skaleret værdi (index-reg)
   uint16_t  rawReg;      // holding register for rå værdi (raw-reg)

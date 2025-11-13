@@ -149,9 +149,9 @@ struct PersistConfig {
   uint8_t counterResetOnReadEnable[4];  // individuel reset-on-read pr. counter (0/1)
   uint8_t counterAutoStartEnable[4];    // individuel auto-start pr. counter (0/1)
 
-  // GPIO pin-mapping
-  int16_t gpioToCoil[NUM_GPIO];   // map pin -> coil index (eller -1 hvis ingen)
-  int16_t gpioToInput[NUM_GPIO];  // map pin -> discrete input index (eller -1)
+  // GPIO pin mappings (v3.3.6+: restored persistence)
+  int16_t gpioToCoil[NUM_GPIO];        // GPIO pin -> coil index (-1 = unmapped)
+  int16_t gpioToInput[NUM_GPIO];       // GPIO pin -> input index (-1 = unmapped)
 
   // Integritet
   uint16_t crc;            // checksum (additiv) over alle felter undtagen crc

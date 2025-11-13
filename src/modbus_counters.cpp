@@ -630,7 +630,7 @@ bool counters_config_set(uint8_t id, const CounterConfig& src) {
     if (oldC.hwMode == 1) oldPin = 5;
     else if (oldC.hwMode == 3) oldPin = 47;
     else if (oldC.hwMode == 4) oldPin = 6;
-    else if (oldC.hwMode == 5) oldPin = 46;
+    else if (oldC.hwMode == 5) oldPin = 47;
 
     // Only clear if: old pin was mapped AND (not transitioning to same pin with HW-mode)
     if (oldPin > 0 && gpioToInput[oldPin] == (int16_t)oldC.inputIndex) {
@@ -639,7 +639,7 @@ bool counters_config_set(uint8_t id, const CounterConfig& src) {
       if (src.hwMode == 1) newPin = 5;
       else if (src.hwMode == 3) newPin = 47;
       else if (src.hwMode == 4) newPin = 6;
-      else if (src.hwMode == 5) newPin = 46;
+      else if (src.hwMode == 5) newPin = 47;
 
       // Only clear if pins are different or HW-mode is being disabled
       if (oldPin != newPin || src.hwMode == 0) {

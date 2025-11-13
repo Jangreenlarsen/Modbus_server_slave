@@ -12,10 +12,6 @@
 // Global config (avoid stack overflow - struct is >1KB)
 PersistConfig globalConfig;
 
-// DEBUG: Pin 2 polling test
-volatile uint32_t pin2PollCount = 0;
-uint8_t pin2LastState = 0;
-
 static void print_banner() {
   Serial.println(F("=== MODBUS RTU SLAVE ==="));
   Serial.print(F("Version: ")); Serial.println(F(VERSION_STRING));
@@ -82,25 +78,11 @@ void loop() {
     cli_try_enter();
   }
 
-  // DEBUG: Pin 2 polling test (detect edges and count)
-  uint8_t pin2Now = digitalRead(2) ? 1 : 0;
-  if (pin2Now != pin2LastState) {
-    pin2PollCount++;
-    pin2LastState = pin2Now;
-  }
-
   // Heartbeat (1 Hz)
   static unsigned long last = 0;
   if (millis() - last > 1000) {
     last = millis();
     digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-
-    // DEBUG: Print pin 2 polling stats
-    Serial.print(F("DEBUG PIN2 POLL: edges="));
-    Serial.print(pin2PollCount);
-    Serial.print(F(" state="));
-    Serial.println(pin2Now);
-    pin2PollCount = 0;
   }
 
   // Modbus when enabled

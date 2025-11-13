@@ -26,18 +26,6 @@ static uint8_t interruptToCounter[6] = {0, 0, 0, 0, 0, 0};
 // Previous pin states for edge detection (per counter)
 static uint8_t counterLastState[4] = {0, 0, 0, 0};
 
-// DEBUG: Volatile counters to track ISR activity (for debugging) - detailed phase tracking
-volatile uint32_t isrCallCount[4] = {0, 0, 0, 0};
-volatile uint32_t isrCountCount[4] = {0, 0, 0, 0};
-volatile uint32_t isrDebugEnabled[4] = {0, 0, 0, 0};
-volatile uint32_t isrDebugRunning[4] = {0, 0, 0, 0};
-volatile uint32_t isrDebugPin[4] = {0, 0, 0, 0};
-volatile uint32_t isrDebugEdge[4] = {0, 0, 0, 0};
-volatile uint32_t isrDebugDebounce[4] = {0, 0, 0, 0};
-volatile uint32_t isrDebugPrescaler[4] = {0, 0, 0, 0};
-
-// DEBUG: RAW ISR trigger counters (incremented directly in ISR wrappers)
-volatile uint32_t isrRawTrigger[6] = {0, 0, 0, 0, 0, 0};  // INT0-INT5
 
 // ============================================================================
 // Valid Interrupt Pin Mapping
@@ -78,21 +66,15 @@ void sw_counter_interrupt_handler(uint8_t counter_id) {
   if (counter_id < 1 || counter_id > 4) return;
 
   uint8_t idx = counter_id - 1;
-  isrCallCount[idx]++;  // DEBUG: Track ISR calls (volatile)
-
   CounterConfig& c = counters[idx];
 
   if (!c.enabled || c.hwMode != 0) return;  // Only SW mode
-  isrDebugEnabled[idx]++;  // Passed enabled/hwMode check
-
   if (!c.running) return;                    // Counter must be running to count
-  isrDebugRunning[idx]++;  // Passed running check
 
   // Read current pin state directly from the hardware pin associated with this interrupt
   // (ignore GPIO mapping and inputIndex - ISR mode reads directly from the interrupt pin)
   uint8_t pin = counterToInterruptPin[idx];
   if (pin == 0) return;  // Not attached
-  isrDebugPin[idx]++;  // Passed pin attachment check
 
   uint8_t now = digitalRead(pin) ? 1 : 0;  // Read directly from hardware pin
   uint8_t last = counterLastState[idx];
@@ -107,7 +89,6 @@ void sw_counter_interrupt_handler(uint8_t counter_id) {
   counterLastState[idx] = now;
 
   if (!fire) return;
-  isrDebugEdge[idx]++;  // Passed edge detection
 
   // Debounce check (if enabled)
   unsigned long nowMs = millis();
@@ -120,7 +101,6 @@ void sw_counter_interrupt_handler(uint8_t counter_id) {
   } else if (fire) {
     c.lastEdgeMs = millis();
   }
-  isrDebugDebounce[idx]++;  // Passed debounce check
 
   // Prescaler counter
   uint16_t pre = (c.prescaler == 0) ? 1 : c.prescaler;
@@ -130,7 +110,6 @@ void sw_counter_interrupt_handler(uint8_t counter_id) {
     return;
   }
   c.edgeCount = 0;
-  isrDebugPrescaler[idx]++;  // Passed prescaler check
 
   // Count step
   uint8_t bw = c.bitWidth;
@@ -155,8 +134,6 @@ void sw_counter_interrupt_handler(uint8_t counter_id) {
       c.counterValue++;
     }
   }
-
-  isrCountCount[idx]++;  // DEBUG: Track actual count increments
 
   if (overflow) {
     c.overflowFlag = 1;
@@ -183,46 +160,40 @@ void sw_counter_interrupt_handler(uint8_t counter_id) {
 // ============================================================================
 // ISR Handlers - External Interrupts INT0..INT5
 // ============================================================================
-// CRITICAL: These MUST be static/global, NOT local variables!
+// CRITICAL: These MUST be static, NOT local variables!
 // Arduino's attachInterrupt() stores the function pointer, so it must remain valid
 
 static void isr_int0() {
-  isrRawTrigger[0]++;  // DEBUG: Raw trigger count
   if (interruptToCounter[0] > 0) {
     sw_counter_interrupt_handler(interruptToCounter[0]);
   }
 }
 
 static void isr_int1() {
-  isrRawTrigger[1]++;  // DEBUG: Raw trigger count
   if (interruptToCounter[1] > 0) {
     sw_counter_interrupt_handler(interruptToCounter[1]);
   }
 }
 
 static void isr_int2() {
-  isrRawTrigger[2]++;  // DEBUG: Raw trigger count
   if (interruptToCounter[2] > 0) {
     sw_counter_interrupt_handler(interruptToCounter[2]);
   }
 }
 
 static void isr_int3() {
-  isrRawTrigger[3]++;  // DEBUG: Raw trigger count
   if (interruptToCounter[3] > 0) {
     sw_counter_interrupt_handler(interruptToCounter[3]);
   }
 }
 
 static void isr_int4() {
-  isrRawTrigger[4]++;  // DEBUG: Raw trigger count
   if (interruptToCounter[4] > 0) {
     sw_counter_interrupt_handler(interruptToCounter[4]);
   }
 }
 
 static void isr_int5() {
-  isrRawTrigger[5]++;  // DEBUG: Raw trigger count
   if (interruptToCounter[5] > 0) {
     sw_counter_interrupt_handler(interruptToCounter[5]);
   }
@@ -235,15 +206,11 @@ static void isr_int5() {
 bool sw_counter_attach_interrupt(uint8_t counter_id, uint8_t pin) {
   if (counter_id < 1 || counter_id > 4) return false;
   if (!sw_counter_is_valid_interrupt_pin(pin)) {
-    Serial.print(F("DEBUG: attachInterrupt FAIL - invalid pin "));
-    Serial.println(pin);
     return false;
   }
 
   int8_t intNum = sw_counter_pin_to_interrupt(pin);
   if (intNum < 0 || intNum > 5) {
-    Serial.print(F("DEBUG: attachInterrupt FAIL - bad intNum "));
-    Serial.println(intNum);
     return false;
   }
 
@@ -254,9 +221,6 @@ bool sw_counter_attach_interrupt(uint8_t counter_id, uint8_t pin) {
       if (otherPin > 0) {
         int8_t otherInt = sw_counter_pin_to_interrupt(otherPin);
         if (otherInt >= 0 && otherInt == intNum) {
-          Serial.print(F("DEBUG: attachInterrupt FAIL - intNum "));
-          Serial.print(intNum);
-          Serial.println(F(" already in use"));
           return false;  // Already in use
         }
       }
@@ -271,8 +235,6 @@ bool sw_counter_attach_interrupt(uint8_t counter_id, uint8_t pin) {
     if (oldInt >= 0 && oldInt <= 5) {
       detachInterrupt(oldInt);
       interruptToCounter[oldInt] = 0;
-      Serial.print(F("DEBUG: Detached old INT"));
-      Serial.println(oldInt);
     }
   }
 
@@ -294,34 +256,6 @@ bool sw_counter_attach_interrupt(uint8_t counter_id, uint8_t pin) {
   static void (*isrs[6])() = {isr_int0, isr_int1, isr_int2, isr_int3, isr_int4, isr_int5};
 
   attachInterrupt(intNum, isrs[intNum], CHANGE);
-
-  // DEBUG: Print interrupt register states BEFORE manual fix (AVR ATmega2560)
-  Serial.print(F("DEBUG: attachInterrupt SUCCESS - Counter "));
-  Serial.print(counter_id);
-  Serial.print(F(" attached to INT"));
-  Serial.print(intNum);
-  Serial.print(F(" (pin "));
-  Serial.print(pin);
-  Serial.println(F(")"));
-
-  Serial.print(F("DEBUG: BEFORE manual fix - EIMSK=0x"));
-  Serial.print(EIMSK, HEX);
-  Serial.print(F(" EICRB=0x"));
-  Serial.print(EICRB, HEX);
-  Serial.print(F(" EICRA=0x"));
-  Serial.print(EICRA, HEX);
-  Serial.print(F(" SREG=0x"));
-  Serial.println(SREG, HEX);
-
-  // DEBUG: Print register states after attachInterrupt
-  Serial.print(F("DEBUG: After attachInterrupt - EIMSK=0x"));
-  Serial.print(EIMSK, HEX);
-  Serial.print(F(" EICRB=0x"));
-  Serial.print(EICRB, HEX);
-  Serial.print(F(" EICRA=0x"));
-  Serial.print(EICRA, HEX);
-  Serial.print(F(" SREG=0x"));
-  Serial.println(SREG, HEX);
 
   return true;
 }

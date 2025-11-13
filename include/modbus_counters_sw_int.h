@@ -58,16 +58,3 @@ void sw_counter_detach_interrupt(uint8_t counter_id);
 // Processes edge detection and counter increment
 // counter_id: 1..4
 void sw_counter_interrupt_handler(uint8_t counter_id);
-
-// DEBUG: Volatile counters for ISR activity tracking - detailed phase tracking
-extern volatile uint32_t isrCallCount[4];        // Total ISR calls
-extern volatile uint32_t isrCountCount[4];       // Successful count increments
-extern volatile uint32_t isrDebugEnabled[4];     // Passed enabled/hwMode check
-extern volatile uint32_t isrDebugRunning[4];     // Passed running check
-extern volatile uint32_t isrDebugPin[4];         // Passed pin attachment check
-extern volatile uint32_t isrDebugEdge[4];        // Passed edge detection
-extern volatile uint32_t isrDebugDebounce[4];    // Passed debounce check
-extern volatile uint32_t isrDebugPrescaler[4];   // Passed prescaler check
-
-// DEBUG: RAW ISR trigger counters (incremented directly in ISR wrappers)
-extern volatile uint32_t isrRawTrigger[6];       // INT0-INT5 raw trigger count

@@ -320,68 +320,6 @@ void counters_init() {
 }
 
 void counters_loop() {
-  // DEBUG: Print ISR activity every second (only if counter is ISR mode)
-  static unsigned long lastDebugMs = 0;
-  unsigned long nowMs = millis();
-  bool showDebug = (nowMs - lastDebugMs) > 1000;
-  if (showDebug) {
-    lastDebugMs = nowMs;
-
-    // Print RAW ISR trigger counts (INT0-INT5)
-    Serial.print(F("DEBUG RAW ISR: INT0="));
-    Serial.print(isrRawTrigger[0]);
-    Serial.print(F(" INT1="));
-    Serial.print(isrRawTrigger[1]);
-    Serial.print(F(" INT2="));
-    Serial.print(isrRawTrigger[2]);
-    Serial.print(F(" INT3="));
-    Serial.print(isrRawTrigger[3]);
-    Serial.print(F(" INT4="));
-    Serial.print(isrRawTrigger[4]);
-    Serial.print(F(" INT5="));
-    Serial.println(isrRawTrigger[5]);
-
-    // Reset raw trigger counts
-    for (uint8_t i = 0; i < 6; i++) {
-      isrRawTrigger[i] = 0;
-    }
-
-    for (uint8_t i = 0; i < 4; i++) {
-      if (counters[i].enabled && counters[i].hwMode == 0 && counters[i].interruptPin > 0) {
-        if (isrCallCount[i] > 0 || isrCountCount[i] > 0) {
-          Serial.print(F("DEBUG ISR Counter "));
-          Serial.print(i + 1);
-          Serial.print(F(": calls="));
-          Serial.print(isrCallCount[i]);
-          Serial.print(F(" en="));
-          Serial.print(isrDebugEnabled[i]);
-          Serial.print(F(" run="));
-          Serial.print(isrDebugRunning[i]);
-          Serial.print(F(" pin="));
-          Serial.print(isrDebugPin[i]);
-          Serial.print(F(" edge="));
-          Serial.print(isrDebugEdge[i]);
-          Serial.print(F(" dbnc="));
-          Serial.print(isrDebugDebounce[i]);
-          Serial.print(F(" prsc="));
-          Serial.print(isrDebugPrescaler[i]);
-          Serial.print(F(" counts="));
-          Serial.print(isrCountCount[i]);
-          Serial.print(F(" value="));
-          Serial.println((unsigned long)(counters[i].counterValue & 0xFFFFFFFFUL));
-          isrCallCount[i] = 0;
-          isrCountCount[i] = 0;
-          isrDebugEnabled[i] = 0;
-          isrDebugRunning[i] = 0;
-          isrDebugPin[i] = 0;
-          isrDebugEdge[i] = 0;
-          isrDebugDebounce[i] = 0;
-          isrDebugPrescaler[i] = 0;
-        }
-      }
-    }
-  }
-
   for (uint8_t idx = 0; idx < 4; ++idx) {
     CounterConfig& c = counters[idx];
 
@@ -808,11 +746,6 @@ c.lastEdgeMs = 0;
   // NOTE: SW-ISR mode reads DIRECTLY from the interrupt pin hardware
   // It ignores GPIO mapping and inputIndex parameter - those are only for SW polling mode
   if (c.hwMode == 0 && c.enabled && c.interruptPin > 0) {
-    Serial.print(F("DEBUG: counters_config_set - validating SW-ISR for counter "));
-    Serial.print(id);
-    Serial.print(F(", interruptPin="));
-    Serial.println(c.interruptPin);
-
     // Validate interrupt pin is supported
     if (!sw_counter_is_valid_interrupt_pin(c.interruptPin)) {
       Serial.print(F("ERROR: Counter "));
@@ -822,11 +755,6 @@ c.lastEdgeMs = 0;
       Serial.println(F(" (must be 2, 3, 18, 19, 20, or 21)"));
       return false;
     }
-
-    // SW-ISR mode does NOT require GPIO mapping - it reads directly from the interrupt pin
-    Serial.print(F("DEBUG: Counter "));
-    Serial.print(id);
-    Serial.println(F(" configured for SW-ISR mode (ignores GPIO mapping and input-dis)"));
   }
 
   // Attach/Detach SW-mode interrupt
@@ -834,19 +762,13 @@ c.lastEdgeMs = 0;
   if (c.hwMode == 0) {
     if (c.enabled && c.interruptPin > 0) {
       // Attach interrupt for enabled SW-mode counter with interrupt pin configured
-      Serial.print(F("DEBUG: counters_config_set calling attach for counter "));
-      Serial.println(id);
       sw_counter_attach_interrupt(id, c.interruptPin);
     } else {
       // Detach interrupt if: counter disabled, HW mode changed, or polling mode set
-      Serial.print(F("DEBUG: counters_config_set calling detach for counter "));
-      Serial.println(id);
       sw_counter_detach_interrupt(id);
     }
   } else {
     // HW-mode or other: always detach any SW interrupt (in case of mode transition)
-    Serial.print(F("DEBUG: counters_config_set HW-mode, detaching counter "));
-    Serial.println(id);
     sw_counter_detach_interrupt(id);
   }
 

@@ -630,7 +630,7 @@ bool counters_config_set(uint8_t id, const CounterConfig& src) {
     if (oldC.hwMode == 1) oldPin = 5;
     else if (oldC.hwMode == 3) oldPin = 47;
     else if (oldC.hwMode == 4) oldPin = 6;
-    else if (oldC.hwMode == 5) oldPin = 47;
+    else if (oldC.hwMode == 5) oldPin = 2;
 
     // Only clear if: old pin was mapped AND (not transitioning to same pin with HW-mode)
     if (oldPin > 0 && gpioToInput[oldPin] == (int16_t)oldC.inputIndex) {
@@ -639,7 +639,7 @@ bool counters_config_set(uint8_t id, const CounterConfig& src) {
       if (src.hwMode == 1) newPin = 5;
       else if (src.hwMode == 3) newPin = 47;
       else if (src.hwMode == 4) newPin = 6;
-      else if (src.hwMode == 5) newPin = 47;
+      else if (src.hwMode == 5) newPin = 2;
 
       // Only clear if pins are different or HW-mode is being disabled
       if (oldPin != newPin || src.hwMode == 0) {
@@ -714,9 +714,9 @@ c.lastEdgeMs = 0;
       Serial.print(c.id);
       Serial.println(F(" HW mode not supported (only Timer5/pin47 available). Using SW mode instead."));
     } else {
-      // Only Timer5 (hwMode=5) is supported - Pin 47 (PL2/T5)
+      // Only Timer5 (hwMode=5) is supported - Pin 2 (PE4/T5)
       uint8_t hw_id = 4;  // Timer5
-      uint8_t pin = 47;   // Pin 47 (PL2/T5) - ONLY Timer5 external clock input on Arduino Mega 2560
+      uint8_t pin = 2;    // Pin 2 (PE4) - Timer5 external clock input (verified working)
 
       if (hw_id != 0) {
       // Check for GPIO conflicts and remove STATIC mappings
@@ -878,7 +878,7 @@ void counters_print_status() {
       if (c.hwMode == 1) gpioPin = 5;
       else if (c.hwMode == 3) gpioPin = 47;
       else if (c.hwMode == 4) gpioPin = 6;
-      else if (c.hwMode == 5) gpioPin = 47;
+      else if (c.hwMode == 5) gpioPin = 2;
       sprintf(buf, "%-5d| ", gpioPin);
     } else if (c.hwMode == 0 && c.interruptPin > 0) {
       // SW-ISR mode: show interrupt pin directly

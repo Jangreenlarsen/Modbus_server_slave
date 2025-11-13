@@ -92,8 +92,8 @@ bool hw_counter_init(uint8_t counter_id, uint8_t mode, uint32_t start_value) {
   hwCounterPrescalerMode[3] = mode;
 
   // Only Timer5 case (counter_id=4) is implemented
-  // Timer5 uses Pin 47 (PL2/T5) - the ONLY external clock input routed to Arduino Mega 2560 headers
-  if (mode != 0) pinMode(47, INPUT);
+  // Timer5 uses Pin 2 (PE4/T5) - verified working on Arduino Mega 2560
+  if (mode != 0) pinMode(2, INPUT);
   cli();  // Disable interrupts during setup
   TCCR5B = 0x00;                    // STOP timer first (no clock source)
   TCCR5A = 0x00;

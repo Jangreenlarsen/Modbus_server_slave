@@ -753,20 +753,15 @@ c.lastEdgeMs = 0;
         gpio_handle_dynamic_conflict(pin);
       }
 
-      // Auto-map GPIO pin to discrete input for HW-mode counters
-      // This enables GPIO-polling to read the physical pin and write to discrete input
-      if (c.inputIndex < NUM_DISCRETE) {
-        // BUGFIX v3.6.2: Remove any conflicting GPIO mappings to the same inputIndex
-        // Prevents multiple PINs from mapping to the same discrete input
-        for (uint8_t p = 0; p < NUM_GPIO; p++) {
-          if (p != pin && gpioToInput[p] == (int16_t)c.inputIndex) {
-            gpioToInput[p] = -1;  // Remove conflicting mapping
-          }
-        }
-        // Now safely set this HW mode's pin mapping
-        gpioToInput[pin] = (int16_t)c.inputIndex;
-        pinMode(pin, INPUT);
-      }
+      // CRITICAL v3.6.2 BUGFIX: HW Counter must NOT be GPIO-mapped!
+      // Reason: Timer5 external clock uses PIN 2 (PE4) for pulse input
+      // GPIO polling reads PIN 2 every loop, causing hardware timer malfunction
+      // HW counters read directly from hardware timer registers, not GPIO polling
+      //
+      // Clear ANY existing GPIO mapping for this pin to prevent GPIO polling interference
+      gpioToInput[pin] = -1;  // DO NOT map HW timer pin to GPIO polling
+
+      // Note: inputIndex is only used for display/logging, not for input reading
 
       // Initialize HW timer with prescaler mode and start value
       // Convert prescaler value (1,8,64,256,1024) to mode (1,3,4,5,6) for HW init

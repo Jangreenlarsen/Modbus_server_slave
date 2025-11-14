@@ -550,6 +550,21 @@ static void print_gpio_config_block() {
     Serial.println(F(")"));
   }
 
+  // DYNAMIC GPIO mappings from SW-ISR counters (v3.6.2 NEW)
+  for (uint8_t i = 0; i < 4; ++i) {
+    const CounterConfig& c = counters[i];
+    if (!c.enabled || c.hwMode != 0 || c.interruptPin == 0) continue;  // Only SW-ISR mode with interrupt pin
+
+    any = true;
+    Serial.print(F("  gpio "));
+    Serial.print(c.interruptPin);  // Show the actual interrupt pin
+    Serial.print(F(" DYNAMIC at input "));
+    Serial.print(c.inputIndex);
+    Serial.print(F(" (counter"));
+    Serial.print(c.id);
+    Serial.println(F(" SW-ISR)"));
+  }
+
   if (!any) {
     Serial.println(F("  (no gpio mappings)"));
   }

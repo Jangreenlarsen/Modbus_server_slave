@@ -787,6 +787,21 @@ c.lastEdgeMs = 0;
       Serial.println(F(" (must be 2, 3, 18, 19, 20, or 21)"));
       return false;
     }
+
+    // v3.6.2 NEW: Add DYNAMIC GPIO mapping for SW-ISR interrupt pin
+    // This shows which interrupt pin this counter uses (informational/documentation)
+    // SW-ISR mode reads directly from interrupt hardware, not from GPIO polling
+    uint8_t int_pin = c.interruptPin;
+    if (int_pin > 0 && int_pin < NUM_GPIO) {
+      // Clear any conflicting mappings to the same inputIndex
+      for (uint8_t p = 0; p < NUM_GPIO; p++) {
+        if (p != int_pin && gpioToInput[p] == (int16_t)c.inputIndex) {
+          gpioToInput[p] = -1;
+        }
+      }
+      // Set this interrupt pin's mapping (informational only)
+      gpioToInput[int_pin] = (int16_t)c.inputIndex;
+    }
   }
 
   // Attach/Detach SW-mode interrupt

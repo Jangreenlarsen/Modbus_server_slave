@@ -23,10 +23,10 @@ volatile uint32_t hwCounter5Extend = 0;
 volatile uint16_t hwOverflowCount = 0;
 
 // ============================================================================
-// ISR - Timer5 Overflow (Pin 2 / PE4 / T5, external clock mode)
+// ISR - Timer5 Overflow (Pin 47 / PL2 / T5, external clock mode)
 // ============================================================================
 // CRITICAL: ISRs must NEVER call micros() or millis() - causes RAM corruption!
-// Timer5 counts external pulses on T5 pin in TCCR5B = 0x07 mode.
+// Timer5 counts external pulses on T5 pin (Pin 47) in TCCR5B = 0x07 mode.
 // Overflow occurs when TCNT5 increments from 0xFFFF to 0x0000.
 ISR(TIMER5_OVF_vect) {
   hwCounter5Extend++;  // Extend counter for 32-bit support
@@ -42,7 +42,7 @@ ISR(TIMER5_OVF_vect) {
 // Returns true if successful, false if counter_id != 4
 //
 // HARDWARE ARCHITECTURE:
-// - Timer5 pin: Pin 2 (PE4/T5) on Arduino Mega 2560
+// - Timer5 pin: Pin 47 (PL2/T5) on Arduino Mega 2560
 // - Clock source: ONLY external clock mode (TCCR5B = 0x07) for pulse counting
 // - Prescaler: Implemented 100% in software (not used in hardware)
 //   Reason: ATmega2560 external clock mode does NOT support hardware prescaler
@@ -69,9 +69,9 @@ bool hw_counter_init(uint8_t counter_id, uint8_t mode, uint32_t start_value) {
   uint16_t tcnt_val = (uint16_t)(start_value & 0xFFFF);      // Lower 16 bits for TCNT5
   uint16_t extend_val = (uint16_t)(start_value >> 16);       // Upper 16 bits for extension
 
-  // Configure Timer5 (Pin 2 input)
+  // Configure Timer5 (Pin 47 input / PL2 / T5)
   if (mode != 0) {
-    pinMode(2, INPUT);  // Set Pin 2 (T5) as input for pulse counting
+    pinMode(47, INPUT);  // Set Pin 47 (T5/PL2) as input for pulse counting
   }
 
   // Atomic setup (disable interrupts during configuration)

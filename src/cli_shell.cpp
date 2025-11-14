@@ -732,7 +732,7 @@ static void cmd_show(uint8_t ntok, char* tok[]) {
     Serial.println(F("=== DEBUG HW COUNTER STATE (Timer5 only) ==="));
     Serial.print(F("hwCounter5Extend: ")); Serial.println(hwCounter5Extend);
     Serial.print(F("TCNT5: ")); Serial.println(TCNT5);
-    Serial.print(F("Pin 2 (T5/PE4): ")); Serial.println(digitalRead(2));
+    Serial.print(F("Pin 47 (T5/PL2): ")); Serial.println(digitalRead(47));
     Serial.println(F("========================================"));
 
     return; 

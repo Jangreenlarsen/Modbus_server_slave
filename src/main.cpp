@@ -27,7 +27,7 @@ void setup() {
   // This prevents ISR corruption of Serial/timing during boot
   // NOTE: Timer5 is the ONLY timer used for HW counters on Arduino Mega
   // Timer1, Timer3, Timer4 are not routed to headers and not implemented
-  TIMSK5 = 0x00;  // Timer5 external clock mode (for HW counter via pin 2)
+  TIMSK5 = 0x00;  // Timer5 external clock mode (for HW counter via pin 47)
 
   pinMode(LED_BUILTIN, OUTPUT);
   Serial.begin(115200);

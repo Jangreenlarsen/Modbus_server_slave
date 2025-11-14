@@ -4,11 +4,11 @@
 //  Version  : v3.6.1 (2025-11-14)
 //  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Hardware Counter Engine - Timer5 only implementation.
-//             Bruger Mega2560's Timer5 (Pin 2, PE4/T5) til
+//             Bruger Mega2560's Timer5 (Pin 47, PL2/T5) til
 //             deterministic, interrupt-baseret pulse counting.
 //             Unified prescaler strategy (v3.6.0+).
 //  Hardware Limitation:
-//    - Only Timer5 (T5/PE4/Pin 2) praktisk accessible on Arduino Mega
+//    - Only Timer5 (T5/PL2/Pin 47) praktisk accessible on Arduino Mega
 //    - Timer1, Timer3, Timer4 NOT routed to board headers
 //    - Timer5 external clock mode does NOT support HW prescaler
 //    - Prescaler implemented 100% in software (see modbus_counters.cpp)
@@ -32,7 +32,7 @@ extern volatile uint16_t hwOverflowCount;   // Overflow count for Timer5
 // API Functions (Timer5 only)
 // ============================================================================
 
-// Initialize HW Timer5 for pulse counting via external clock (Pin 2 / PE4 / T5)
+// Initialize HW Timer5 for pulse counting via external clock (Pin 47 / PL2 / T5)
 // mode: 0=stop timer, 1=external clock (rising edge on T5 pin)
 // start_value: initial value to set the counter to (default 0)
 // Returns true if successful, false if mode invalid

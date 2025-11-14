@@ -36,7 +36,7 @@ The codebase is organized into three main execution subsystems:
    - Debounce filtering (configurable ms)
    - **Three Operating Modes (v3.6.1 unified prescaler strategy)**:
      - **SW (Polling)**: `hw-mode:sw` - Software polling via discrete inputs
-     - **SW-ISR (Interrupt)**: `hw-mode:sw-isr` - Hardware interrupt (INT1-INT5: pins 3,18,19,20,21) - UNDGAA INT0 (Pin 2 brugt af Timer5)
+     - **SW-ISR (Interrupt)**: `hw-mode:sw-isr` - Hardware interrupt (INT0-INT5: pins 2,3,18,19,20,21) - alle tilgængelige
      - **HW (Timer5 ONLY)**: `hw-mode:hw-t5` - Hardware Timer5 external clock (Pin 2/PE4/T5, max ~20 kHz, v3.6.1+ ENESTE timer)
    - **CRITICAL Hardware Limitation (v3.4.7)**:
      - ATmega2560 Timer5 external clock mode CANNOT use hardware prescaler
@@ -236,7 +236,7 @@ pio device monitor -p COM3 -b 115200
 - ADC ISR
 
 **Quick Facts:**
-- Timer5 external clock input: **Pin 2 (PE4/T5)** - RECOMMENDED for hw-mode:hw-t5
+- Timer5 external clock input: **Pin 47 (PL2/T5)** - RECOMMENDED for hw-mode:hw-t5
 - Timer0 external clock input: **Pin 38 (PD7/T0)** - AVOID (kernel dependencies)
 - SW-ISR interrupt pins: **Pins 2,3,18,19,20,21 (INT0-INT5)** - Pin 2 har både T5 og INT2, Pin 20 har PE6/T3 konflikt
 - Max Timer5 frequency: ~20 kHz (clamped for stability)

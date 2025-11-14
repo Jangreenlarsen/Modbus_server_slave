@@ -1,8 +1,8 @@
-# Modbus RTU Server v3.3.0
+# Modbus RTU Server v3.6.1
 
-🚀 **Production-Ready** Arduino Mega 2560 Modbus RTU Server med CLI, Timer Engine og Hardware/Software Counter Engine.
+🚀 **Production-Ready** Arduino Mega 2560 Modbus RTU Server med Unified Prescaler Architecture, 3 Counter Modes (HW/SW/SW-ISR), CLI, og Timer Engine.
 
-[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](https://github.com/Jangreenlarsen/Modbus_server_slave/releases/tag/v3.3.0)
+[![Version](https://img.shields.io/badge/version-3.6.1-blue.svg)](https://github.com/Jangreenlarsen/Modbus_server_slave/releases/tag/v3.6.1)
 [![Platform](https://img.shields.io/badge/platform-Arduino%20Mega%202560-green.svg)](https://www.arduino.cc/en/Main/ArduinoBoardMega2560)
 [![Framework](https://img.shields.io/badge/framework-PlatformIO-orange.svg)](https://platformio.org/)
 
@@ -51,19 +51,30 @@
 - ✅ Global status/control registers
 - ✅ EEPROM persistence
 
-### CounterEngine v4 (with v3.3.0 HW/SW support)
-- ✅ 4 independent counters
-- ✅ **Hybrid HW/SW operation mode - NEW in v3.3.0**
-  - **HW Mode**: Direct hardware timer input (Timer1/3/4/5 on pins 5/47/6/46)
-  - **SW Mode**: Software edge detection on GPIO pins
+### CounterEngine v6 (with v3.6.1 Unified Prescaler)
+- ✅ 4 independent counters with **3 operating modes**
+- ✅ **HW Mode**: Direct hardware timer input (T1/T3/T4/T5 on pins 5/47/6/2)
+  - Highest precision, 0-20 kHz capable
+  - CRITICAL FIX (v3.4.3): Timer5 uses pin 2 (NOT pin 46!)
+- ✅ **SW-ISR Mode**: Interrupt-driven edge detection (INT0-INT5: pins 2,3,18,19,20,21)
+  - Hardware interrupt triggered, deterministic
+  - High-frequency capable (5-20 kHz)
+  - NEW in v3.4.0, unified prescaler in v3.6.1
+- ✅ **SW Mode**: Software polling-based edge detection on GPIO pins
+  - Flexible GPIO selection
+  - Debounce filtering (1-255 ms)
+  - Suitable for low-frequency signals
+- ✅ **UNIFIED Prescaler Strategy (v3.6.0+)** - BREAKING CHANGE
+  - ALL modes count EVERY edge (no edge skipping)
+  - Prescaler division ONLY at output (raw register)
+  - Consistent behavior: HW, SW, SW-ISR identical
+  - Prescaler values: 1, 4, 8, 16, 64, 256, 1024
 - ✅ Edge detection (rising/falling/both)
-- ✅ Prescaler (1-256)
 - ✅ Direction (up/down)
 - ✅ BitWidth (8/16/32/64)
 - ✅ Float scale factor
-- ✅ Debounce (configurable ms for SW mode)
 - ✅ **Frequency measurement (0-20 kHz) with 1-2 sec timing windows**
-- ✅ **Separate raw register (unscaled values)**
+- ✅ **Separate raw register (counterValue / prescaler)**
 - ✅ **Consistent parameter naming (index-reg, raw-reg, freq-reg)**
 - ✅ **Automatic GPIO pin management for HW mode**
 - ✅ **Dynamic GPIO mappings display**
@@ -90,9 +101,9 @@
 
 ### Board Configuration
 - **Platform**: Arduino Mega 2560 (ATmega2560 @ 16MHz)
-- **RAM**: 8 KB (56.8% used)
-- **Flash**: 256 KB (20.1% used)
-- **EEPROM**: 4 KB
+- **RAM**: 8 KB (83.5% used, 1.3 KB free) - increased due to v3.3.0 global config allocation
+- **Flash**: 256 KB (27.2% used) - plenty of headroom
+- **EEPROM**: 4 KB (schema v10)
 
 ### Pin Assignments
 | Pin | Function | Description |
@@ -101,7 +112,9 @@
 | 18-19 | Serial1 | Modbus RTU (configurable baud) |
 | 8 | RS-485 DIR | Direction control for RS-485 transceiver |
 | 13 | LED | Heartbeat indicator |
-| 2-53 | GPIO | Available for coils/inputs (except above) |
+| **5, 47, 6, 2** | **HW Timers** | **Timer1/3/4/5 external clock (HW counter mode)** |
+| **2, 3, 18, 19, 20, 21** | **INT0-INT5** | **External interrupts (SW-ISR counter mode)** |
+| 2-53 | GPIO | Available for coils/inputs and SW counters |
 
 ### RS-485 Wiring
 | Arduino Pin | RS-485 Module | Function |
@@ -158,36 +171,68 @@ pio device monitor
 ### 3. Enter CLI Mode
 Type `CLI` and press Enter to enter command mode.
 
-### 4. Configure Counter - Hardware Mode (NEW in v3.3.0)
+### 4. Configure Counter - Three Operating Modes (v3.6.1)
+
+#### Hardware Mode (Highest Precision, 0-20 kHz)
 ```bash
-# Configure counter 1 in HARDWARE mode (Timer1 on pin 5)
-set counter 1 mode 1 parameter hw-mode:hw-t1 \
+# Configure counter 1 in HARDWARE mode (Timer5 on pin 2)
+set counter 1 mode 1 parameter hw-mode:hw-t5 \
   count-on:rising start-value:0 res:32 prescaler:1 \
   index-reg:100 raw-reg:104 freq-reg:108 \
-  overload-reg:120 ctrl-reg:130 input-dis:125 \
-  direction:up scale:1.0
+  ctrl-reg:130 input-dis:125 direction:up scale:1.0
 
-# Configure counter 2 in SOFTWARE mode (GPIO pin-based)
-set counter 2 mode 1 parameter hw-mode:sw \
+# Enable auto-start
+set counter 1 start enable
+```
+
+#### Software-ISR Mode (Interrupt-Driven, 5-20 kHz)
+```bash
+# Configure counter 2 in SW-ISR mode (INT0 on pin 2)
+set counter 2 mode 1 parameter hw-mode:sw-isr \
   count-on:rising start-value:0 res:32 prescaler:1 \
   index-reg:110 raw-reg:114 freq-reg:118 \
-  ctrl-reg:131 input-dis:20 direction:up scale:2.5 \
+  ctrl-reg:131 input-dis:20 direction:up scale:1.0
+
+# Map interrupt pin to discrete input (REQUIRED for SW-ISR!)
+gpio map 2 input 20
+
+# Enable auto-start
+set counter 2 start enable
+```
+
+#### Software Polling Mode (Flexible GPIO, Low-Frequency)
+```bash
+# Configure counter 3 in SOFTWARE mode (GPIO pin-based)
+set counter 3 mode 1 parameter hw-mode:sw \
+  count-on:rising start-value:0 res:32 prescaler:1 \
+  index-reg:120 raw-reg:124 freq-reg:128 \
+  ctrl-reg:132 input-dis:30 direction:up scale:2.5 \
   debounce:on debounce-ms:50
 
-# Enable auto-start on boot
-set counter 1 start enable
-set counter 2 start enable
+# Map GPIO pin 22 to discrete input 30
+gpio map 22 input 30
 
-# Save configuration
+# Enable auto-start
+set counter 3 start enable
+```
+
+```bash
+# Save all configuration
 save
 ```
 
-**Hardware Timer Selection:**
-- `hw-mode:hw-t1` - Timer1 on pin 5 (recommended frequency input)
+**Counter Mode Selection:**
+- `hw-mode:hw-t1` - Timer1 on pin 5 (highest precision)
 - `hw-mode:hw-t3` - Timer3 on pin 47
 - `hw-mode:hw-t4` - Timer4 on pin 6
-- `hw-mode:hw-t5` - Timer5 on pin 46
-- `hw-mode:sw` - Software mode (GPIO pin-based edge detection)
+- `hw-mode:hw-t5` - Timer5 on pin 2 (CRITICAL FIX v3.4.3: NOT pin 46!)
+- `hw-mode:sw-isr` - Software-ISR on INT0-INT5 (pins 2,3,18,19,20,21)
+- `hw-mode:sw` - Software polling on any GPIO pin
+
+**BREAKING CHANGE (v3.6.0+):**
+- ALL modes now count EVERY edge (no edge skipping)
+- Prescaler division happens ONLY at output (raw register)
+- Unified values: 1, 4, 8, 16, 64, 256, 1024
 
 ### 5. View Status
 ```bash
@@ -458,14 +503,23 @@ set timer 4 mode 4 parameter \
 
 ## 📚 Dokumentation
 
-### Manualer
-- **[MANUAL.md](MANUAL.md)** - Komplet Modbus RTU Server manual v3.3.0 (dansk/english)
-  - Hardware/Software counter modes (NEW in v3.3.0)
+### Manualer (v3.6.1)
+- **[Modbus server V3.6.1 Manual - Unified Prescaler Architecture.html](Modbus%20server%20V3.6.1%20Manual%20-%20Unified%20Prescaler%20Architecture.html)** - ✨ **NEW** Complete HTML manual with all v3.6.1 features
+  - Unified prescaler architecture (v3.6.0-v3.6.1)
+  - All 3 counter modes: HW, SW, SW-ISR (v3.3.0 foundation + v3.6.1 unification)
+  - ATmega2560 hardware limitation documentation (v3.4.7 discovery)
+  - BREAKING CHANGES documentation
+  - Interactive CLI command reference
+  - Frequency measurement with prescaler
+  - Practical examples with all 3 modes
+  - Complete troubleshooting guide
+
+- **[MANUAL.md](MANUAL.md)** - Komplet Markdown manual v3.3.0 (dansk/english)
+  - Hardware/Software counter modes
   - GPIO mapping and DYNAMIC configuration
   - CLI kommando reference med eksempler
   - Frequency measurement og timer features
-  - Troubleshooting og best practices
-- **[Modbus server V3.2.0 Manual](Modbus%20server%20V3.2.0%20Manual%20-%20counter%20adv%20mode.html)** - Legacy manual (dansk)
+  - Extensive troubleshooting section
 
 ### Guides
 - **[INSTALLATION.md](INSTALLATION.md)** - Detaljeret installations guide
@@ -478,38 +532,67 @@ set timer 4 mode 4 parameter \
 ## 📊 Version Info
 
 ```
-Version:        v3.3.0
-Build Date:     2025-11-11
-EEPROM Schema:  v10 (HW counter support)
+Version:        v3.6.1
+Build Date:     2025-11-14
+EEPROM Schema:  v10
 Platform:       Arduino Mega 2560 (ATmega2560 @ 16MHz)
 Framework:      Arduino + PlatformIO
-RAM Usage:      82.4% (6751 / 8192 bytes)
-Flash Usage:    21.2% (53956 / 253952 bytes)
-Status:         ✅ PRODUCTION READY
+RAM Usage:      83.5% (6841 / 8192 bytes) - 1.3 KB free
+Flash Usage:    27.2% (68994 / 253952 bytes) - good headroom
+Status:         ✅ PRODUCTION READY (Unified Prescaler Architecture)
 ```
 
-### v3.3.0 Highlights (2025-11-11) - Hardware Counter Engine
-- ✨ **NEW: Hardware counter support (HW/SW dual mode)**
-  - 4 independent hardware timers (T1/T3/T4/T5 on pins 5/47/6/46)
-  - Software GPIO-based fallback mode
-  - Automatic GPIO mapping (DYNAMIC) for HW mode
-  - Explicit timer selection: `hw-mode:hw-t1|hw-t3|hw-t4|hw-t5`
-- ✨ Improved CLI configuration display
-  - Separate discrete input and GPIO pin display
-  - DYNAMIC GPIO mappings in config section
-  - Corrected pin column in `show counters` (actual GPIO pins)
-- ✨ Fixed SAVE command stack overflow (global config allocation)
-- ✨ EEPROM schema v10 with hw-mode field
-- ✨ Backward compatible with v3.2.0
+### v3.6.1 Highlights (2025-11-14) - Unified Prescaler Architecture Complete
+- 🔴 **CRITICAL FIX: SW-ISR mode prescaler consistency**
+  - Removed edge-skipping from interrupt handler
+  - NOW: ALL three modes (HW, SW, SW-ISR) count EVERY edge
+  - Prescaler division happens ONLY at output (raw register)
+  - Complete consistency across all counter modes
+- ✅ **Unified Prescaler Strategy (v3.6.0-v3.6.1)**
+  - HW mode: Hardware counts all pulses → raw = value / prescaler
+  - SW mode: Software counts all edges → raw = value / prescaler
+  - SW-ISR mode: ISR counts all edges → raw = value / prescaler
+  - Prescaler values: 1, 4, 8, 16, 64, 256, 1024
+- ✅ **SW-ISR Mode Production Ready**
+  - Interrupt-driven edge detection (INT0-INT5: pins 2,3,18,19,20,21)
+  - Deterministic, 5-20 kHz capable
+  - Fully integrated with unified prescaler architecture
+- ⚠️ **BREAKING CHANGE**: SW/SW-ISR counters will show different values after upgrade
 
-### Version History
+### v3.6.0 Highlights (2025-11-14) - CRITICAL: SW Mode Prescaler Fix
+- 🔴 **CRITICAL FIX: SW mode prescaler consistency with HW mode**
+  - Removed edgeCount prescaler check (was double-counting)
+  - ALL modes now count EVERY edge (no edge skipping)
+  - Prescaler division happens ONLY at output
+  - Unified behavior: HW, SW, SW-ISR identical
+- 💡 **Discovery: ATmega2560 Hardware Limitation (v3.4.7)**
+  - External clock mode CANNOT use hardware prescaler
+  - Solution: 100% software prescaler implementation
+
+### v3.4.7 Highlights (2025-11-14) - Software Prescaler Implementation
+- 🔍 **ROOT CAUSE DISCOVERED**: ATmega2560 Timer5 hardware limitation
+  - External clock (0x07): Counts pulses, no prescaler available
+  - Internal prescaler (0x02-0x05): Count 16MHz system clock, ignore pulses!
+  - Solution: Hardware ALWAYS uses external clock mode
+  - Prescaler implemented 100% in software
+
+### v3.4.3 Highlights (2025-11-13) - Timer5 Pin Mapping Fix
+- 🔴 **CRITICAL: Timer5 uses pin 2 (NOT pin 46!)**
+  - Verified working with hardware testing
+  - Updated all documentation
+
+### Version History (Selection)
 | Version | Date | Key Features |
 |---------|------|-------------|
-| v3.3.0 | 2025-11-11 | Hardware counter mode, GPIO management, improved CLI display |
+| **v3.6.1** | 2025-11-14 | 🔴 SW-ISR prescaler fix, unified architecture, SW-ISR production ready |
+| **v3.6.0** | 2025-11-14 | 🔴 CRITICAL: SW mode prescaler fix, unified strategy |
+| v3.5.0 | 2025-11-14 | Show counters display bug fix |
+| v3.4.7 | 2025-11-14 | 🔴 Software prescaler implementation, ATmega2560 limitation discovered |
+| v3.4.3 | 2025-11-13 | 🔴 Timer5 pin 2 fix (not pin 46) |
+| v3.4.0 | 2025-11-13 | SW-ISR interrupt mode production ready |
+| v3.3.0 | 2025-11-11 | Hardware counter mode, HW/SW dual modes, GPIO management |
 | v3.2.0 | 2025-11-10 | Frequency measurement, raw register, consistent naming |
 | v3.1.9 | 2025-11-09 | Counter control improvements, CLI enhancements |
-| v3.1.7 | 2025-11 | Raw counter value, reset-on-read, auto-start |
-| v3.1.4 | 2025-05 | CounterEngine v3 (scale/direction) |
 
 ---
 
@@ -525,7 +608,7 @@ Contributions are welcome! Please:
 ## 📞 Support
 
 - **GitHub Issues**: [Report bugs or request features](https://github.com/Jangreenlarsen/Modbus_server_slave/issues)
-- **Latest Release**: [v3.2.0](https://github.com/Jangreenlarsen/Modbus_server_slave/releases/tag/v3.2.0)
+- **Latest Release**: [v3.6.1](https://github.com/Jangreenlarsen/Modbus_server_slave/releases/tag/v3.6.1)
 - **Repository**: [Jangreenlarsen/Modbus_server_slave](https://github.com/Jangreenlarsen/Modbus_server_slave)
 
 ---
@@ -547,4 +630,4 @@ Built with:
 
 **Status: PRODUCTION READY** ✅
 
-*Last updated: 2025-11-11 | v3.3.0*
+*Last updated: 2025-11-14 | v3.6.1 - Unified Prescaler Architecture Complete*

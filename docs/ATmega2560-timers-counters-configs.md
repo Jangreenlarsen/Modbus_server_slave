@@ -133,11 +133,11 @@ Precision: Afhængig af polling frekvens
 ```
 Implementation: Hardware interrupt-baseret edge detection
 Hardware Pins: INT0-INT5 på ATmega2560
-├─ INT0: Pin 2 (PD0)
+├─ INT0: Pin 2 (PD0)           ← BEMÆRK: KONFLIKT med Timer5 T5 pin!
 ├─ INT1: Pin 3 (PD1)
 ├─ INT2: Pin 18 (PE4)
 ├─ INT3: Pin 19 (PE5)
-├─ INT4: Pin 20 (PE6)  ← KONFLIKT! Se note nedenfor
+├─ INT4: Pin 20 (PE6)
 └─ INT5: Pin 21 (PE7)
 
 Tælling: ISR udløst på hver edge (deterministic, no polling delay)
@@ -145,21 +145,26 @@ Prescaler: Software implementeret
 Precision: Høj, ISR-baseret tælling
 ```
 
-**⚠️ VIGTIG NOTE - INT3 Konflikt:**
-- Pin 20/PE6 bruges både som INT4 interrupt OG som T3 (Timer3 external clock)
-- Aktuel dokumentation siger INT4 bruger PE6, men dette er FEJL i vores references
-- Timer3 T3 pin er PE6, som kan være i konflikt med interrupt brug
-- SE NEDENFOR under "Praktiske Begrænsninger" for resolution
+**⚠️ VIGTIG NOTE - Pin 2 Konflikt:**
+- Pin 2 bruges BÅDE som INT0 interrupt OG som T5 (Timer5 external clock)
+- HW mode bruger Pin 2 for Timer5 clock input
+- HVIS du bruger SW-ISR mode skal du UNDGÅ INT0 (Pin 2)
+- Brug i stedet INT1-INT5 (pins 3, 18-21)
 
-#### Mode 3: HW (Hardware Timer5)
+#### Mode 3: HW (Hardware Timer5 - ENESTE TIMER IMPLEMENTERET)
 ```
-Implementation: Timer5 external clock mode
+Implementation: Timer5 external clock mode (ONLY supported in HW mode)
 Hardware Pin: T5 / PE4 / Arduino Pin 2
 Clock Input: TCCR5B = 0x07 (external clock, rising edge)
 Counter Register: TCNT5 (16-bit, 0-65535)
 Max Frequency: ~20 kHz
 
-KRITISK HARDWARE BEGRÆNSNING (v3.4.7):
+VIGTIG: Fra v3.6.1+ er KUN Timer5 implementeret i HW mode.
+Timer1, Timer3, Timer4 er IKKE routed til Arduino Mega headers
+og er derfor ikke praktisk tilgængelige. Se separate
+dokumentation i ATmega2560-timers-counters-configs.md for detaljer.
+
+KRITISK HARDWARE BEGRÆNSNING (v3.4.7+):
 ┌─────────────────────────────────────────────────────┐
 │ ATmega2560 Timer5 Prescaler PROBLEM                 │
 ├─────────────────────────────────────────────────────┤
@@ -370,17 +375,17 @@ Timer5 Maksimal Frequency:
 ✅ **Alternative modes:**
 ```
 ├─ SW mode: GPIO polling via discrete inputs
-├─ SW-ISR mode: INT0-INT5 interrupt pins
-│  └─ Undgå INT4 hvis muligt (PE6 konflikt)
+├─ SW-ISR mode: INT1-INT5 interrupt pins ONLY
+│  └─ UNDGÅ INT0 (Pin 2) - brugt af Timer5 T5 clock input!
 └─ HW mode: Timer5 (ANBEFALET)
 ```
 
 ### Hvad Skal Undgås
 
-❌ **Timer0** - Kernel afhængigheder
-❌ **Timer1, Timer3, Timer4** - Ikke praktisk tilgængelige
-❌ **Timer2** - Ingen externe clock support
-❌ **Pin 9 (PE6) som INT4** - Konflikt med T3
+- **INT0 / Pin 2**: Bruges af Timer5 T5 clock input (HW mode) - UNDGAA for SW-ISR
+- **Timer0**: Kernel afhængigheder (millis, delay, Serial timing)
+- **Timer1, Timer3, Timer4**: Ikke praktisk tilgængelige på Arduino Mega
+- **Timer2**: Ingen eksterne clock support
 
 ### Fremtidigt Upgrade
 

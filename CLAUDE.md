@@ -36,8 +36,8 @@ The codebase is organized into three main execution subsystems:
    - Debounce filtering (configurable ms)
    - **Three Operating Modes (v3.6.1 unified prescaler strategy)**:
      - **SW (Polling)**: `hw-mode:sw` - Software polling via discrete inputs
-     - **SW-ISR (Interrupt)**: `hw-mode:sw-isr` - Hardware interrupt-driven (INT0-INT5: pins 2,3,18,19,20,21)
-     - **HW (Timer5)**: `hw-mode:hw-t5` - Hardware Timer5 external clock (pin 2, max ~20 kHz)
+     - **SW-ISR (Interrupt)**: `hw-mode:sw-isr` - Hardware interrupt (INT1-INT5: pins 3,18,19,20,21) - UNDGAA INT0 (Pin 2 brugt af Timer5)
+     - **HW (Timer5 ONLY)**: `hw-mode:hw-t5` - Hardware Timer5 external clock (Pin 2/PE4/T5, max ~20 kHz, v3.6.1+ ENESTE timer)
    - **CRITICAL Hardware Limitation (v3.4.7)**:
      - ATmega2560 Timer5 external clock mode CANNOT use hardware prescaler
      - Internal prescaler modes count system clock (16MHz), NOT external pulses
@@ -155,9 +155,10 @@ pio device monitor -p COM3 -b 115200
      - User can map GPIO: `gpio map <pin> input <N>`
 
   2. **SW-ISR (Interrupt) Mode**: `set counter <id> mode 1 parameter hw-mode:sw-isr interrupt-pin:<PIN> prescaler:<P> ...`
-     - Hardware interrupts on pins 2,3,18,19,20,21 (INT0-INT5)
+     - Hardware interrupts on pins 3,18,19,20,21 (INT1-INT5 ONLY)
+     - UNDGAA PIN 2 (INT0) - brugt af Timer5 T5 clock input for HW mode
      - ISR counts every edge immediately (deterministic, no polling delay)
-     - Must use valid interrupt pins
+     - Must use valid interrupt pins (3, 18, 19, 20, 21)
      - Example: `set counter 1 mode 1 parameter hw-mode:sw-isr interrupt-pin:21 prescaler:64 index-reg:40 raw-reg:44`
 
   3. **HW (Timer5) Mode**: `set counter <id> mode 1 parameter hw-mode:hw-t5 prescaler:<P> ...`
@@ -252,17 +253,20 @@ pio device monitor -p COM3 -b 115200
   - Still 1.3 KB free for runtime operations
 - **Flash**: 27.2% of 256 KB used (68994 bytes) - plenty of room for features
 - **EEPROM**: 4 KB - stores PersistConfig with CRC (schema v10)
-- **Timers**: 6 available on ATmega2560 chip (Timer0-Timer5)
-  - Timer0, Timer1, Timer2: Standard timers
-  - Timer3, Timer4, Timer5: Extended 16-bit timers (Arduino Mega only)
-  - **External clock input pins**: Only T0 (pin 38) and T5 (pin 2) practically accessible on Arduino Mega
-  - Timer5 recommended for hw-mode:hw-t5 (no kernel conflicts)
+- **Timers**: 6 available on ATmega2560 chip (Timer0-Timer5), BUT ONLY Timer5 in HW mode
+  - Timer0 (8-bit): Kernel dependencies (millis/delay/Serial)
+  - Timer1 (16-bit): Not routed to Arduino Mega headers
+  - Timer2 (8-bit): No external clock support
+  - Timer3 (16-bit): Not routed to Arduino Mega headers
+  - Timer4 (16-bit): Not routed to Arduino Mega headers
+  - Timer5 (16-bit): ONLY TIMER IMPLEMENTED for hw-mode:hw-t5 (pin 2, PE4, T5)
+  - **External clock input pins practically accessible**: ONLY T5 (pin 2) for HW counters (v3.6.1+)
 - **Counters**: 4 maximum per system (hardware/design constraint)
-  - 3 operating modes per counter: SW (polling), SW-ISR (interrupt), HW (Timer5)
-  - Each mode can use different hardware: GPIO polling, INT0-INT5 interrupts, or Timer5 external clock
+  - 3 operating modes per counter: SW (polling), SW-ISR (interrupt), HW (Timer5 only)
+  - Each mode uses different hardware: GPIO polling, INT1-INT5 interrupts, or Timer5 external clock
 - **Frequency measurement**: 0-20 kHz range (validated and clamped by design)
-- **Interrupt pins**: 6 available for SW-ISR mode (INT0-INT5: pins 2,3,18,19,20,21)
-  - ⚠️ Pin 20 (INT4/PE6): Potential conflict with Timer3 T3 pin (not used in current design)
+- **Interrupt pins for SW-ISR**: 5 available (INT1-INT5: pins 3,18,19,20,21)
+  - INT0 (pin 2): RESERVED for Timer5 T5 clock input in HW mode - UNDGAA for SW-ISR
 
 ## Backward Compatibility Notes
 

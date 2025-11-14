@@ -206,15 +206,34 @@ pio device monitor -p COM3 -b 115200
 - Help text via `?` or `help` command
 - New commands should follow existing patterns (case-insensitive, space-delimited parameters)
 
-## ATmega2560 Hardware Reference
+## ATmega2560 Hardware Reference & ISR Status
 
 **IMPORTANT: See `docs/ATmega2560-timers-counters-configs.md` for comprehensive documentation on:**
 - All available hardware timers (Timer0-Timer5) and external clock pins
 - Arduino Mega 2560 pin mapping (only T0 and T5 are accessible)
 - Timer5 hardware limitations and prescaler architecture
-- SW-ISR interrupt pin availability (INT0-INT5)
+- SW-ISR interrupt pin availability (INT1-INT5 ONLY, not INT0)
+- ISR/kernel dependencies and conflicts
 - Practical considerations and conflicts
 - Future upgrade paths for multiple counters
+
+### ISR Status (v3.6.1)
+**KERNEL DEPENDENCIES (DO NOT MODIFY):**
+- Timer0 ISRs: millis(), delay(), Serial timing
+- USART0 ISRs: Serial USB communication
+- USART1 ISRs: Modbus RS-485 communication
+
+**USED BY PROJECT:**
+- Timer5 overflow ISR: HW counter via Pin 2
+- INT1-INT5 ISRs: SW-ISR counter mode
+
+**RESERVED (AVOID):**
+- INT0 (Pin 2): Reserved for Timer5 T5 clock in HW mode
+
+**AVAILABLE FOR FUTURE USE:**
+- Timer1, Timer3, Timer4 ISRs (timers not routed)
+- USART2-3 ISRs
+- ADC ISR
 
 **Quick Facts:**
 - Timer5 external clock input: **Pin 2 (PE4/T5)** - RECOMMENDED for hw-mode:hw-t5

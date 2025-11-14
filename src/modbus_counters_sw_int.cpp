@@ -28,13 +28,16 @@ static uint8_t counterLastState[4] = {0, 0, 0, 0};
 
 
 // ============================================================================
-// Valid Interrupt Pin Mapping
+// Valid Interrupt Pin Mapping for SW-ISR Mode
 // ============================================================================
 
-// Arduino Mega 2560 interrupt-capable pins
-// Use digitalPinToInterrupt() for correct mapping!
-static const uint8_t validInterruptPins[] = {2, 3, 18, 19, 20, 21};
-static const uint8_t NUM_VALID_PINS = 6;
+// Arduino Mega 2560 interrupt-capable pins (v3.6.1 updated)
+// IMPORTANT: Pin 2 (INT0) is RESERVED for Timer5 T5 clock input in HW mode
+// For SW-ISR mode, use INT1-INT5 only (pins 3, 18, 19, 20, 21)
+// NOTE: INT0 (Pin 2) can be used ONLY if HW mode is not active!
+// Use digitalPinToInterrupt() for correct mapping on Arduino Mega
+static const uint8_t validInterruptPins[] = {3, 18, 19, 20, 21};  // INT1-INT5 ONLY
+static const uint8_t NUM_VALID_PINS = 5;
 
 // ============================================================================
 // Helpers

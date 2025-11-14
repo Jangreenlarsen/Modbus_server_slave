@@ -114,6 +114,80 @@ Arduino Mega 2560 Pin 2
 
 ---
 
+## ISR (Interrupt Service Routine) Status & Konflikt Analyse
+
+### Arduino Kernel ISRs (RESERVERET - UNDGAA)
+
+```
+Timer ISRs:
+├─ TIMER0_OVF_vect, TIMER0_COMPA_vect, TIMER0_COMPB_vect
+│  ├─ BRUGT AF: Arduino kernel (millis, delay, micros)
+│  └─ STATUS: DO NOT TOUCH - Vil ØDELÆGGE timing!
+
+Serial ISRs:
+├─ USART0_RX_vect, USART0_TX_vect
+│  ├─ BRUGT AF: Serial USB communication
+│  └─ STATUS: DO NOT TOUCH - Vil ØDELÆGGE serial
+├─ USART1_RX_vect, USART1_TX_vect
+│  ├─ BRUGT AF: Modbus RTU RS-485 communication
+│  └─ STATUS: DO NOT TOUCH - Vil ØDELÆGGE Modbus
+```
+
+### Project-Brugte ISRs
+
+```
+Timer ISRs:
+├─ TIMER5_OVF_vect (Timer5 Overflow)
+│  ├─ BRUGT AF: HW counter mode (Pin 2 external clock)
+│  └─ STATUS: PART OF PROJECT - Do not modify!
+
+External Interrupt ISRs (INT0-INT5):
+├─ INT0_vect (Pin 2)
+│  ├─ STATUS: RESERVED for Timer5 T5 clock input
+│  └─ UNDGAA for SW-ISR mode!
+├─ INT1_vect (Pin 3) ✅ AVAILABLE for SW-ISR
+├─ INT2_vect (Pin 18) ✅ AVAILABLE for SW-ISR
+├─ INT3_vect (Pin 19) ✅ AVAILABLE for SW-ISR
+├─ INT4_vect (Pin 20) ✅ AVAILABLE for SW-ISR
+└─ INT5_vect (Pin 21) ✅ AVAILABLE for SW-ISR
+```
+
+### ISR Availability for Future Features
+
+```
+Available ISRs (Unused):
+├─ Timer1 ISRs (TIMER1_OVF_vect, etc.)
+│  └─ Timer1 not routed to Arduino Mega headers
+├─ Timer3 ISRs (TIMER3_OVF_vect, etc.)
+│  └─ Timer3 not routed to Arduino Mega headers
+├─ Timer4 ISRs (TIMER4_OVF_vect, etc.)
+│  └─ Timer4 not routed to Arduino Mega headers
+├─ Timer2 ISRs (TIMER2_OVF_vect, etc.)
+│  └─ No external clock support
+├─ USART2 ISRs, USART3 ISRs
+│  └─ Serial ports 2 and 3 not used
+└─ ADC_vect
+   └─ Only if analog measurements with interrupt used
+```
+
+### SW-ISR Mode ISR Behavior
+
+**Implementation Method:** Arduino's `attachInterrupt()` function
+- Automatically handles ISR registration
+- Maps pins to interrupt numbers via `digitalPinToInterrupt()`
+- Supports multiple counters on different INT pins
+
+**Valid Pins for SW-ISR (v3.6.1):**
+- INT1-INT5: Pins 3, 18, 19, 20, 21 (RECOMMENDED)
+- INT0: Pin 2 (ONLY if Timer5 HW mode not used - AVOID)
+
+**Conflict Resolution:**
+- SW-ISR uses INT1-INT5 → No conflict with Timer5
+- If only SW-ISR used (no HW mode) → INT0 available but NOT RECOMMENDED
+- NEVER use INT0 if Timer5 HW mode enabled → Hardware T5 clock conflicts
+
+---
+
 ## Counter Implementering
 
 ### Counter Arkitektur (v3.6.1 Unified Prescaler)

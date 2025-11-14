@@ -23,12 +23,11 @@ void setup() {
   // Disable watchdog immediately (prevent boot loop on EEPROM issues)
   wdt_disable();
 
-  // CRITICAL: Disable all timer interrupts before any other init
+  // CRITICAL: Disable Timer5 interrupt before any other init (v3.6.1+)
   // This prevents ISR corruption of Serial/timing during boot
-  TIMSK1 = 0x00;  // Timer1 (used by HW counter 1)
-  TIMSK3 = 0x00;  // Timer3 (used by HW counter 2)
-  TIMSK4 = 0x00;  // Timer4 (used by HW counter 3)
-  TIMSK5 = 0x00;  // Timer5 (used by HW counter 4)
+  // NOTE: Timer5 is the ONLY timer used for HW counters on Arduino Mega
+  // Timer1, Timer3, Timer4 are not routed to headers and not implemented
+  TIMSK5 = 0x00;  // Timer5 external clock mode (for HW counter via pin 2)
 
   pinMode(LED_BUILTIN, OUTPUT);
   Serial.begin(115200);

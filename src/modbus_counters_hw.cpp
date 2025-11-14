@@ -1,185 +1,133 @@
 // ============================================================================
 //  Filnavn : modbus_counters_hw.cpp
 //  Projekt  : Modbus RTU Server / CLI
-//  Version  : v3.3.0 (2025-11-11)
+//  Version  : v3.6.1 (2025-11-14)
 //  Forfatter: JanG at modbus_slave@laces.dk
-//  Formål   : Hardware Counter Engine implementation.
-//             ISRs for Timer1, Timer3, Timer4, Timer5 overflow events.
-//             Supports external clock (pulse input) mode for deterministic counting.
+//  Formål   : Hardware Counter Engine - Timer5 ONLY implementation.
+//             ISR for Timer5 overflow events (external clock mode on Pin 2).
+//             Supports deterministic, interrupt-driven pulse counting.
+//             Unified prescaler strategy: ALL pulses counted, prescaler in software.
 // ============================================================================
 
 #include "modbus_counters_hw.h"
 
 // ============================================================================
-// Global HW Counter State
+// Global HW Counter State (Timer5 only)
 // ============================================================================
 
-volatile uint32_t hwCounter1Extend = 0;
-volatile uint32_t hwCounter3Extend = 0;
-volatile uint32_t hwCounter4Extend = 0;
+// Timer5 32-bit value = (hwCounter5Extend << 16) | TCNT5
+// hwCounter5Extend holds overflow count (increments on overflow from TCNT5)
 volatile uint32_t hwCounter5Extend = 0;
-volatile uint16_t hwOverflowCount[4] = {0, 0, 0, 0};
+
+// Overflow tracking for frequency measurement
+volatile uint16_t hwOverflowCount = 0;
 
 // ============================================================================
-// ISR - Timer1 Overflow (Counter 1, Pin D5/T1)
+// ISR - Timer5 Overflow (Pin 2 / PE4 / T5, external clock mode)
 // ============================================================================
-// IMPORTANT: ISRs must NEVER call micros() or millis() - causes corruption!
-ISR(TIMER1_OVF_vect) {
-  hwCounter1Extend++;
-  hwOverflowCount[0]++;
-}
-
-// ============================================================================
-// ISR - Timer3 Overflow (Counter 2, Pin D47/T3)
-// ============================================================================
-ISR(TIMER3_OVF_vect) {
-  hwCounter3Extend++;
-  hwOverflowCount[1]++;
-}
-
-// ============================================================================
-// ISR - Timer4 Overflow (Counter 3, Pin D6/T4)
-// ============================================================================
-ISR(TIMER4_OVF_vect) {
-  hwCounter4Extend++;
-  hwOverflowCount[2]++;
-}
-
-// ============================================================================
-// ISR - Timer5 Overflow (Counter 4, Pin D46/T5)
-// ============================================================================
+// CRITICAL: ISRs must NEVER call micros() or millis() - causes RAM corruption!
+// Timer5 counts external pulses on T5 pin in TCCR5B = 0x07 mode.
+// Overflow occurs when TCNT5 increments from 0xFFFF to 0x0000.
 ISR(TIMER5_OVF_vect) {
-  hwCounter5Extend++;
-  hwOverflowCount[3]++;
+  hwCounter5Extend++;  // Extend counter for 32-bit support
+  hwOverflowCount++;   // Track overflows for frequency validation
 }
 
 // ============================================================================
-// Initialize HW Counter
+// Initialize HW Counter (Timer5 only)
 // ============================================================================
-// counter_id: 1..4 (maps to Timer1/3/4/5)
-// mode: 0 = off, 1 = external clock (T pin), 2/3/4/5 = internal prescale
-// start_value: initial value to set the counter to (default 0)
+// counter_id: MUST be 4 (Timer5 is only supported timer)
+// mode: 0 = stop timer, 1 = external clock mode (T5 pin, rising edge)
+// start_value: initial counter value (32-bit: high 16 bits = extend, low 16 bits = TCNT5)
+// Returns true if successful, false if counter_id != 4
+//
+// HARDWARE ARCHITECTURE:
+// - Timer5 pin: Pin 2 (PE4/T5) on Arduino Mega 2560
+// - Clock source: ONLY external clock mode (TCCR5B = 0x07) for pulse counting
+// - Prescaler: Implemented 100% in software (not used in hardware)
+//   Reason: ATmega2560 external clock mode does NOT support hardware prescaler
+//   Internal prescaler modes (0x02-0x06) count system clock, NOT T5 pin pulses!
+// - Overflow: TCNT5 increments from 0x0000 to 0xFFFF, then overflows (triggers ISR)
+// - 32-bit support: hwCounter5Extend tracks overflows for values > 65535
 bool hw_counter_init(uint8_t counter_id, uint8_t mode, uint32_t start_value) {
-  // CRITICAL: Arduino Mega 2560 only supports Timer5 (pin 47) for external clock input!
-  // Timer1, Timer3, Timer4 external clock inputs are NOT routed to board headers.
-  // Only counter_id=4 (Timer5) is supported.
+  // CRITICAL: ONLY Timer5 is supported!
+  // Timer1, Timer3, Timer4 external clock inputs NOT routed on Arduino Mega 2560
+  if (counter_id != 4) return false;
 
-  if (counter_id != 4) return false;  // Only Timer5 (counter_id=4) is supported
+  // Validate mode: 0 = stop, 1 = external clock
+  if (mode > 1) return false;
 
-  uint8_t tccrb_clksel = 0;
-
-  // CRITICAL: ATmega2560 Timer5 hardware limitation!
-  // External clock mode (0x07) counts pulses on T5 pin but CANNOT use prescaler.
-  // Internal prescaler modes (0x02-0x05) count system clock (16MHz / prescaler), NOT pulses!
-  //
-  // Solution: ALWAYS use external clock mode (0x07) for pulse counting.
-  // Prescaler is implemented in SOFTWARE by dividing counter value.
-  //
-  // See ATmega2560 datasheet Table 17-6 (TCCR5B Clock Select):
-  //   CS52:0 = 0b111 (0x07) = External clock on T5 pin, rising edge
-  //   CS52:0 = 0b010-0b101 = Internal clock (clkIO / prescaler) - IGNORES T5 pin!
-
+  // Configure TCCR5B for external or stopped
+  uint8_t tccrb_clksel;
   if (mode == 0) {
     tccrb_clksel = 0x00;  // Stop timer (no clock source)
   } else {
-    tccrb_clksel = 0x07;  // ALWAYS use external clock for pulse counting
-                          // Prescaler is handled in software (see modbus_counters.cpp)
+    tccrb_clksel = 0x07;  // External clock mode: rising edge on T5 pin
   }
 
-  // Extract 16-bit TCNT and 16-bit extend parts from 32-bit start_value
-  uint16_t tcnt_val = (uint16_t)(start_value & 0xFFFF);
-  uint16_t extend_val = (uint16_t)(start_value >> 16);
+  // Parse 32-bit start_value into 16-bit parts
+  uint16_t tcnt_val = (uint16_t)(start_value & 0xFFFF);      // Lower 16 bits for TCNT5
+  uint16_t extend_val = (uint16_t)(start_value >> 16);       // Upper 16 bits for extension
 
-  // NOTE: Prescaler is now handled in software (see modbus_counters.cpp)
-  // Hardware always uses external clock mode (no prescaler)
-  // hwCounterPrescalerMode is no longer used
+  // Configure Timer5 (Pin 2 input)
+  if (mode != 0) {
+    pinMode(2, INPUT);  // Set Pin 2 (T5) as input for pulse counting
+  }
 
-  // Only Timer5 case (counter_id=4) is implemented
-  // Timer5 uses Pin 2 (PE4/T5) - verified working on Arduino Mega 2560
-  if (mode != 0) pinMode(2, INPUT);
-  cli();  // Disable interrupts during setup
-  TCCR5B = 0x00;                    // STOP timer first (no clock source)
-  TCCR5A = 0x00;
+  // Atomic setup (disable interrupts during configuration)
+  cli();
+
+  TCCR5B = 0x00;                    // STOP timer (clear clock source bits)
+  TCCR5A = 0x00;                    // Normal mode (not PWM)
   TCNT5 = tcnt_val;                 // Set initial counter value
-  hwOverflowCount[3] = 0;
-  hwCounter5Extend = extend_val;    // Set extension registers
-  TIFR5 = 0x01;                     // CLEAR overflow flag (bit 0 = TOV5) BEFORE enabling interrupt
+  hwOverflowCount = 0;              // Clear overflow tracking
+  hwCounter5Extend = extend_val;    // Set extension for 32-bit support
+  TIFR5 = 0x01;                     // Clear overflow flag (TOV5, bit 0)
   TIMSK5 = 0x00;                    // Disable interrupt temporarily
-  TCCR5B = tccrb_clksel;
-  TIMSK5 = (mode != 0) ? 0x01 : 0x00;
+
+  TCCR5B = tccrb_clksel;            // Apply clock source (start counting)
+  TIMSK5 = (mode != 0) ? 0x01 : 0x00;  // Enable overflow interrupt if mode=1
+
   sei();  // Re-enable interrupts
+
   return true;
 }
 
 // ============================================================================
-// Get Combined Counter Value (Extension + Current)
+// Get Combined Counter Value (Timer5 only)
 // ============================================================================
+// Returns 32-bit value: (hwCounter5Extend << 16) | TCNT5
+// Safely reads volatile registers with interrupt protection
 uint32_t hw_counter_get_value(uint8_t counter_id) {
-  if (counter_id < 1 || counter_id > 4) return 0;
+  // Only Timer5 (counter_id=4) is supported
+  if (counter_id != 4) return 0;
 
   uint16_t tcnt = 0;
   uint32_t extend = 0;
 
-  // Read with interrupt protection
-  cli();  // Disable interrupts
-
-  switch (counter_id) {
-    case 1:
-      extend = hwCounter1Extend;
-      tcnt = TCNT1;
-      break;
-    case 2:
-      extend = hwCounter3Extend;
-      tcnt = TCNT3;
-      break;
-    case 3:
-      extend = hwCounter4Extend;
-      tcnt = TCNT4;
-      break;
-    case 4:
-      extend = hwCounter5Extend;
-      tcnt = TCNT5;
-      break;
-  }
-
-  sei();  // Enable interrupts
+  // Atomic read (protect against ISR modifications)
+  cli();
+  extend = hwCounter5Extend;
+  tcnt = TCNT5;
+  sei();
 
   // Combine: (extend << 16) | tcnt for 32-bit value
   return (extend << 16) | tcnt;
 }
 
 // ============================================================================
-// Reset HW Counter
+// Reset HW Counter (Timer5 only)
 // ============================================================================
+// Resets both TCNT5 and extension counter to 0
 void hw_counter_reset(uint8_t counter_id) {
-  if (counter_id < 1 || counter_id > 4) return;
+  // Only Timer5 (counter_id=4) is supported
+  if (counter_id != 4) return;
 
-  cli();  // Disable interrupts
-
-  switch (counter_id) {
-    case 1:
-      TCNT1 = 0;
-      hwCounter1Extend = 0;
-      hwOverflowCount[0] = 0;
-      break;
-    case 2:
-      TCNT3 = 0;
-      hwCounter3Extend = 0;
-      hwOverflowCount[1] = 0;
-      break;
-    case 3:
-      TCNT4 = 0;
-      hwCounter4Extend = 0;
-      hwOverflowCount[2] = 0;
-      break;
-    case 4:
-      TCNT5 = 0;
-      hwCounter5Extend = 0;
-      hwOverflowCount[3] = 0;
-      break;
-  }
-
-  sei();  // Enable interrupts
+  cli();
+  TCNT5 = 0;
+  hwCounter5Extend = 0;
+  hwOverflowCount = 0;
+  sei();
 }
 
 // ============================================================================
@@ -199,53 +147,56 @@ void hw_counter_reset_frequency(uint8_t counter_id) {
 }
 
 // ============================================================================
-// Stop HW Counter
+// Stop HW Counter (Timer5 only)
 // ============================================================================
+// Stops Timer5 (no clock source) and disables overflow interrupt
 void hw_counter_stop(uint8_t counter_id) {
-  if (counter_id < 1 || counter_id > 4) return;
+  // Only Timer5 (counter_id=4) is supported
+  if (counter_id != 4) return;
 
-  switch (counter_id) {
-    case 1: TCCR1B = 0x00; TIMSK1 = 0x00; break;
-    case 2: TCCR3B = 0x00; TIMSK3 = 0x00; break;
-    case 3: TCCR4B = 0x00; TIMSK4 = 0x00; break;
-    case 4: TCCR5B = 0x00; TIMSK5 = 0x00; break;
-  }
+  cli();
+  TCCR5B = 0x00;   // Clear clock source (stop timer)
+  TIMSK5 = 0x00;   // Disable overflow interrupt
+  sei();
 }
 
 // ============================================================================
-// Update Frequency Measurement (Interrupt-based, Deterministic)
+// Update Frequency Measurement (Timer5 only)
 // ============================================================================
+// Measures frequency in Hz with 1-2 second timing window
+// Updates freq_reg with value in range 0-20000 Hz
+// Called from counters_loop() approximately once per second
 void hw_counter_update_frequency(uint16_t freq_reg, uint8_t counter_id) {
-  if (freq_reg >= NUM_REGS || counter_id < 1 || counter_id > 4) return;
+  // Validate parameters
+  if (freq_reg >= NUM_REGS || counter_id != 4) return;
 
-  static uint32_t lastCounterValue[4] = {0, 0, 0, 0};
-  static unsigned long lastFreqUpdateMs[4] = {0, 0, 0, 0};
-  static bool initialized[4] = {false, false, false, false};
+  // Static tracking variables for Timer5 frequency measurement
+  static uint32_t lastCounterValue = 0;
+  static unsigned long lastFreqUpdateMs = 0;
+  static bool initialized = false;
 
-  uint8_t idx = counter_id - 1;
   unsigned long nowMs = millis();
 
-  // Get current counter value (combines hwCounterXExtend + TCNTX)
-  // This works for ALL frequencies (low, high, and with/without overflows)
+  // Get current counter value (combines hwCounter5Extend + TCNT5)
   uint32_t currentCounterValue = hw_counter_get_value(counter_id);
 
   // Initialize on first call
-  if (!initialized[idx]) {
-    lastCounterValue[idx] = currentCounterValue;
-    lastFreqUpdateMs[idx] = nowMs;
-    initialized[idx] = true;
+  if (!initialized) {
+    lastCounterValue = currentCounterValue;
+    lastFreqUpdateMs = nowMs;
+    initialized = true;
     holdingRegs[freq_reg] = 0;
     return;
   }
 
-  unsigned long timeDeltaMs = nowMs - lastFreqUpdateMs[idx];
+  unsigned long timeDeltaMs = nowMs - lastFreqUpdateMs;
 
   // Detect counter reset: counter value decreased (went backwards)
   // This happens when hw_counter_reset() is called
-  if (currentCounterValue < lastCounterValue[idx]) {
+  if (currentCounterValue < lastCounterValue) {
     // Counter was reset - reinitialize tracking
-    lastCounterValue[idx] = currentCounterValue;
-    lastFreqUpdateMs[idx] = nowMs;
+    lastCounterValue = currentCounterValue;
+    lastFreqUpdateMs = nowMs;
     holdingRegs[freq_reg] = 0;
     return;
   }
@@ -253,17 +204,17 @@ void hw_counter_update_frequency(uint16_t freq_reg, uint8_t counter_id) {
   // Update frequency every ~1 second (1000-2000 ms window for stability)
   if (timeDeltaMs >= 1000 && timeDeltaMs <= 2000) {
     // Calculate pulse delta from counter value
-    // NOTE: Hardware now always counts ALL pulses (external clock mode).
+    // NOTE: Hardware always counts ALL pulses (external clock mode).
     // Prescaler is handled in software (see modbus_counters.cpp).
-    // So counterDelta represents actual pulse count.
-    uint32_t pulseDelta = currentCounterValue - lastCounterValue[idx];
+    // So pulseDelta represents actual pulse count without prescaler compensation.
+    uint32_t pulseDelta = currentCounterValue - lastCounterValue;
 
     // Sanity check: if pulseDelta is unreasonably large, skip measurement
-    // (e.g., pulseDelta > 100000 @ 1sec = >100kHz, max is 20kHz by design)
+    // (e.g., pulseDelta > 100000 @ 1sec = >100kHz, but design max is 20kHz)
     if (pulseDelta > 100000UL) {
       // Skip this measurement as anomalous
-      lastCounterValue[idx] = currentCounterValue;
-      lastFreqUpdateMs[idx] = nowMs;
+      lastCounterValue = currentCounterValue;
+      lastFreqUpdateMs = nowMs;
       return;
     }
 
@@ -277,14 +228,14 @@ void hw_counter_update_frequency(uint16_t freq_reg, uint8_t counter_id) {
     // Write to Modbus register
     holdingRegs[freq_reg] = (uint16_t)freqHz;
 
-    // Update tracking
-    lastCounterValue[idx] = currentCounterValue;
-    lastFreqUpdateMs[idx] = nowMs;
+    // Update tracking for next measurement
+    lastCounterValue = currentCounterValue;
+    lastFreqUpdateMs = nowMs;
   }
   // If time delta is > 5000ms, reset tracking to avoid stale measurements
   else if (timeDeltaMs > 5000) {
-    lastCounterValue[idx] = currentCounterValue;
-    lastFreqUpdateMs[idx] = nowMs;
+    lastCounterValue = currentCounterValue;
+    lastFreqUpdateMs = nowMs;
     holdingRegs[freq_reg] = 0;  // Reset frequency to 0 (timeout)
   }
 }

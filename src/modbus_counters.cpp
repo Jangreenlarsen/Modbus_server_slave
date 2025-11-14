@@ -302,14 +302,11 @@ static void handle_control(CounterConfig& c) {
 
 void counters_init() {
   // Initialize HW counter extension registers to 0 FIRST
-  // These are global variables that track 16-bit overflow extensions
-  hwCounter1Extend = 0;
-  hwCounter3Extend = 0;
-  hwCounter4Extend = 0;
+  // Timer5 only (other timers not accessible on Arduino Mega)
   hwCounter5Extend = 0;
+  hwOverflowCount = 0;
 
   for (uint8_t i = 0; i < 4; ++i) {
-    hwOverflowCount[i] = 0;
 
     CounterConfig& c = counters[i];
     memset(&c, 0, sizeof(CounterConfig));

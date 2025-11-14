@@ -13,7 +13,20 @@
       "Bash(dir:*)",
       "WebFetch(domain:detailspin.com)",
       "WebSearch",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(avr-size:*)",
+      "WebFetch(domain:ww1.microchip.com)",
+      "WebFetch(domain:www.microchip.com)",
+      "WebFetch(domain:serval.mythic-beasts.com)",
+      "WebFetch(domain:onlinedocs.microchip.com)",
+      "WebFetch(domain:stackoverflow.com)",
+      "WebFetch(domain:arduino.stackexchange.com)",
+      "WebFetch(domain:www.generationrobots.com)",
+      "WebFetch(domain:m.abs-chip.com)",
+      "WebFetch(domain:bennthomsen.wordpress.com)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:robu.in)",
+      "WebFetch(domain:forum.arduino.cc)"
     ],
     "deny": [],
     "ask": []

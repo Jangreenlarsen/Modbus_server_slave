@@ -728,17 +728,12 @@ static void cmd_show(uint8_t ntok, char* tok[]) {
       Serial.println(F("=============================="));
     }
 
-    // DEBUG: Show HW counter extension register values
-    Serial.println(F("=== DEBUG HW COUNTER STATE ==="));
-    Serial.print(F("hwCounter1Extend: ")); Serial.println(hwCounter1Extend);
-    Serial.print(F("hwCounter3Extend: ")); Serial.println(hwCounter3Extend);
-    Serial.print(F("hwCounter4Extend: ")); Serial.println(hwCounter4Extend);
+    // DEBUG: Show HW counter (Timer5 only) state
+    Serial.println(F("=== DEBUG HW COUNTER STATE (Timer5 only) ==="));
     Serial.print(F("hwCounter5Extend: ")); Serial.println(hwCounter5Extend);
-    Serial.print(F("TCNT1: ")); Serial.println(TCNT1);
-    Serial.print(F("TCNT3: ")); Serial.println(TCNT3);
-    Serial.print(F("TCNT4: ")); Serial.println(TCNT4);
     Serial.print(F("TCNT5: ")); Serial.println(TCNT5);
-    Serial.println(F("=============================="));
+    Serial.print(F("Pin 2 (T5/PE4): ")); Serial.println(digitalRead(2));
+    Serial.println(F("========================================"));
 
     return; 
   }

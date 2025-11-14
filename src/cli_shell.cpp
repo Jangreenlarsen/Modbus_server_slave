@@ -60,7 +60,7 @@
 //           count-on:<rising|falling|both>
 //           start-value:<n>
 //           res:<8|16|32|64>
-//           prescaler:<1|2|4|8|16|32|64|128|256>
+//           prescaler:<1|4|8|16|64|256|1024>
 //           overload:<reg>
 //           input:<di_index>
 //           reg:<reg_index>
@@ -68,6 +68,8 @@
 //           direction:<up|down>
 //           scale:<float>
 //           debounce:<on|off> [debounce-ms:<n>]
+//           hw-mode:<sw|sw-isr|hw-t5>
+//           interrupt-pin:<2|3|18|19|20|21> (for sw-isr mode)
 //    Implicit enable på "set counter"
 //  - Andre counter kommandoer:
 //      show counters
@@ -93,8 +95,6 @@
 #ifndef MAX_GPIO_PINS
 #define MAX_GPIO_PINS 54
 #endif
-
-#define CLI_VERSION "v3.1.7-patch6"
 
 // Case-insensitive string compare helper
 static bool iequals(const char* a, const char* b) {
@@ -536,7 +536,7 @@ static void print_gpio_config_block() {
     if (c.hwMode == 1) Serial.print(F("5"));
     else if (c.hwMode == 3) Serial.print(F("47"));
     else if (c.hwMode == 4) Serial.print(F("6"));
-    else if (c.hwMode == 5) Serial.print(F("46"));
+    else if (c.hwMode == 5) Serial.print(F("2"));
 
     Serial.print(F(" DYNAMIC at input "));
     Serial.print(c.inputIndex);
@@ -670,7 +670,7 @@ static void cmd_show(uint8_t ntok, char* tok[]) {
 
   if (!strcmp(tok[1],"CONFIG")) {
     Serial.println(F("=== CONFIGURATION ==="));
-    Serial.print(F("Version: ")); Serial.println(VERSION_STRING);
+    Serial.print(F("Version: ")); Serial.println(VERSION_STRING_NY);
     Serial.print(F("Build: "));   Serial.println(VERSION_BUILD);
     Serial.print(F("CLI: "));     Serial.println(F(CLI_VERSION));
 
@@ -744,7 +744,7 @@ static void cmd_show(uint8_t ntok, char* tok[]) {
   }
   if (!strcmp(tok[1],"GPIO"))         { cli_show_gpio();   return; }
   if (!strcmp(tok[1],"VERSION")) {
-    Serial.print(F("Version: ")); Serial.println(VERSION_STRING);
+    Serial.print(F("Version: ")); Serial.println(VERSION_STRING_NY);
     Serial.print(F("Build: "));   Serial.println(VERSION_BUILD);
     return;
   }
@@ -1080,7 +1080,7 @@ static void cmd_set_counter(uint8_t ntok, char* tok[]) {
   //           count-on:<rising|falling|both>
   //           start-value:<n>
   //           res:<8|16|32|64>
-  //           prescaler:<1|2|4|8|16|32|64|128|256>
+  //           prescaler:<1|4|8|16|64|256|1024>
   //           overload:<reg>
   //           input:<di_index>
   //           reg:<reg_index>
@@ -1088,6 +1088,8 @@ static void cmd_set_counter(uint8_t ntok, char* tok[]) {
   //           direction:<up|down>
   //           scale:<float>
   //           debounce:<on|off> [debounce-ms:<n>]
+  //           hw-mode:<sw|sw-isr|hw-t5>
+  //           interrupt-pin:<2|3|18|19|20|21>
   //    Implicit enable på "set counter"
 
   if (ntok < 5) {
@@ -1179,14 +1181,17 @@ uint8_t start = 5;
       continue;
     }
 
-    // prescaler:<1|4|16|64|256|1024> - unified HW/SW prescaler values
+    // prescaler:<1|4|8|16|64|256|1024> - unified HW/SW prescaler values
     if (!strncasecmp(p, "prescaler:", 10)) {
       uint16_t pre = (uint16_t)strtoul(p + 10, nullptr, 10);
-      // Validate: only 1, 4, 16, 64, 256, 1024 allowed
-      if (pre == 1 || pre == 4 || pre == 16 || pre == 64 || pre == 256 || pre == 1024) {
+      // Validate: 1, 4, 8, 16, 64, 256, 1024 allowed
+      // Note: HW mode (Timer5) only supports 1, 8, 64, 256, 1024 (hardware limitation)
+      //       SW/SW-ISR modes support 1, 4, 16, 64, 256, 1024
+      //       sanitizeHWPrescaler() will auto-map unsupported values (4→8, 16→64)
+      if (pre == 1 || pre == 4 || pre == 8 || pre == 16 || pre == 64 || pre == 256 || pre == 1024) {
         cfg.prescaler = pre;
       } else {
-        Serial.println(F("% Invalid prescaler (use: 1|4|16|64|256|1024)"));
+        Serial.println(F("% Invalid prescaler (use: 1|4|8|16|64|256|1024)"));
         return;
       }
       continue;
@@ -1963,7 +1968,7 @@ static void help_counters() {
   Serial.println();
   Serial.println(F(" Configuration:"));
   Serial.println(F(" set counter <id> mode 1 parameter count-on:<rising|falling|both>"));
-  Serial.println(F("   start-value:<n> res|resolution:<8|16|32|64> prescaler:<1|4|16|64|256|1024>"));
+  Serial.println(F("   start-value:<n> res|resolution:<8|16|32|64> prescaler:<1|4|8|16|64|256|1024>"));
   Serial.println(F("   index-reg:<reg> raw-reg:<reg> freq-reg:<reg> ctrl-reg:<reg> overload-reg:<reg>"));
   Serial.println(F("   input-dis:<di_idx> direction:<up|down> scale:<float>"));
   Serial.println(F("   debounce:<on|off> [debounce-ms:<ms>]"));

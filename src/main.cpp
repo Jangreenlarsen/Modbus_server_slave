@@ -14,7 +14,7 @@ PersistConfig globalConfig;
 
 static void print_banner() {
   Serial.println(F("=== MODBUS RTU SLAVE ==="));
-  Serial.print(F("Version: ")); Serial.println(F(VERSION_STRING));
+  Serial.print(F("Version: ")); Serial.println(F(VERSION_STRING_NY));
   Serial.print(F("Build: "));   Serial.println(F(VERSION_BUILD));
   Serial.println(F("==============================================="));
 }

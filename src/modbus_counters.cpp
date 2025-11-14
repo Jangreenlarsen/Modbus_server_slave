@@ -72,11 +72,8 @@ static uint8_t sanitizeEdge(uint8_t e) {
   return CNT_EDGE_RISING;
 }
 
-static uint8_t sanitizePrescaler(uint8_t p) {
-  if (p == 0) return 1;
-  if (p > 255) return 255;
-  return p;
-}
+// REMOVED: sanitizePrescaler() - no longer used after edgeCount removal
+// Prescaler validation now happens only in CLI parser and sanitizeHWPrescaler()
 
 // Sanitize prescaler for SW/SW-ISR mode - only 1, 4, 16, 64, 256, 1024 allowed
 // These match the HW Timer5 internal prescale values for consistency
@@ -92,17 +89,33 @@ static uint16_t sanitizePrescaler_SW(uint16_t p) {
   return 1;
 }
 
-// Validate prescaler for HW mode Timer5 - only 1, 8, 64, 256, 1024 are valid
-// Converts user-friendly values to internal TCCR5B clock select bits
-static uint8_t sanitizeHWPrescaler(uint8_t p) {
-  // Valid prescaler values for HW mode Timer5
-  if (p == 1) return 1;      // External clock (rising edge) - TCCR5B = 0x07
-  if (p == 8) return 3;      // /8 prescale
-  if (p == 64) return 4;     // /64 prescale
-  if (p == 256) return 5;    // /256 prescale
-  if (p == 1024) return 6;   // /1024 prescale
-  // If invalid prescaler, default to external clock (1)
+// Validate prescaler for HW mode (software prescaler implementation)
+// All standard values (1, 4, 8, 16, 64, 256, 1024) are supported
+// Returns the validated prescaler value
+static uint16_t sanitizeHWPrescaler(uint16_t p) {
+  // Valid prescaler values for HW mode (software prescaler)
+  // All standard values are now supported since prescaler is implemented in software
+  if (p == 1) return 1;
+  if (p == 4) return 4;
+  if (p == 8) return 8;
+  if (p == 16) return 16;
+  if (p == 64) return 64;
+  if (p == 256) return 256;
+  if (p == 1024) return 1024;
+  // If invalid prescaler, default to 1
   return 1;
+}
+
+// Convert prescaler value to HW Timer5 mode for hw_counter_init()
+// ALWAYS returns mode 1 (external clock) - prescaler is handled in software
+// Input: prescaler (ignored - kept for backward compatibility)
+// Output: mode 1 (external clock, TCCR5B = 0x07)
+static uint8_t hwPrescalerToMode(uint16_t prescaler) {
+  // ALWAYS return mode 1 (external clock) for HW counters
+  // ATmega2560 Timer5 hardware limitation: Cannot use prescaler with external clock
+  // Prescaler is now implemented in SOFTWARE (see store_value_to_regs)
+  (void)prescaler;  // Unused parameter
+  return 1;  // Mode 1 = external clock (TCCR5B = 0x07)
 }
 
 // Skaleret værdi -> holdingRegs[regIndex..] afhængig af bitWidth
@@ -149,6 +162,15 @@ static void store_value_to_regs(uint8_t idx) {
   //   8/16 bit : 1 word
   //   32 bit   : 2 words
   //   64 bit   : 4 words
+  //
+  // VIGTIGT: Raw register definition (KONSISTENT for HW og SW mode):
+  //   - counterValue = ALLE edges/pulses talt (fuld præcision)
+  //   - raw register = counterValue / prescaler (reduceret størrelse)
+  //   - value register = counterValue × scale (fuld præcision output)
+  //
+  // Dette gør SW og HW mode konsistente:
+  //   HW mode: Hardware tæller alle pulses → raw divideres ved output
+  //   SW mode: Software tæller alle edges → raw divideres ved output
   uint16_t rawBase = 0;
   bool writeRaw = false;
 
@@ -165,7 +187,15 @@ static void store_value_to_regs(uint8_t idx) {
   if (writeRaw) {
     uint8_t rawWords = words;
     if ((uint32_t)rawBase + rawWords <= NUM_REGS) {
-      uint64_t raw = maskToBitWidth((uint64_t)c.counterValue, bw);
+      uint64_t raw = (uint64_t)c.counterValue;
+
+      // BÅDE HW og SW mode: divider med prescaler for raw register
+      // Dette giver konsistent adfærd mellem HW og SW mode
+      if (c.prescaler > 1) {
+        raw = raw / c.prescaler;
+      }
+
+      raw = maskToBitWidth(raw, bw);
       for (uint8_t w = 0; w < rawWords; ++w) {
         holdingRegs[rawBase + w] = (uint16_t)((raw >> (16 * w)) & 0xFFFF);
       }
@@ -356,9 +386,19 @@ void counters_loop() {
       }
       uint8_t hw_id = 4;  // Timer5 only
 
-      // Read HW counter value and update SW representation
+      // Read HW counter value (direct pulse count from hardware)
       uint32_t hwValue = hw_counter_get_value(hw_id);
-      c.counterValue = (uint64_t)hwValue;  // Store for output scaling
+
+      // IMPORTANT: Hardware now ALWAYS uses external clock mode (counts ALL pulses).
+      // Prescaler is implemented in SOFTWARE by dividing for raw register.
+      // See hw_counter_init() in modbus_counters_hw.cpp for details.
+      //
+      // Store undivided hardware value:
+      //   - counterValue = hwValue (all pulses counted)
+      //   - raw register = hwValue / prescaler (software division in store_value_to_regs)
+      //   - value register = hwValue × scale (scaled output)
+      //   - frequency = actual Hz (no prescaler compensation needed)
+      c.counterValue = (uint64_t)hwValue;
 
       // Update frequency measurement using dedicated function
       // This handles first-time initialization correctly
@@ -488,17 +528,9 @@ void counters_loop() {
       continue;
     }
 
-    // Prescaler
-    uint8_t pre = sanitizePrescaler(c.prescaler);
-    c.edgeCount++;
-    if (c.edgeCount < pre) {
-      if (c.overflowReg < NUM_REGS) {
-        holdingRegs[c.overflowReg] = c.overflowFlag ? 1 : 0;
-      }
-      store_value_to_regs(idx);
-      continue;
-    }
-    c.edgeCount = 0;
+    // REMOVED: SW mode prescaler via edgeCount (now handled in store_value_to_regs)
+    // SW mode now counts ALL edges, just like HW mode
+    // Prescaler division happens only at output (raw register)
 
     // Count step
     uint8_t bw = sanitizeBitWidth(c.bitWidth);
@@ -732,10 +764,11 @@ c.lastEdgeMs = 0;
       }
 
       // Initialize HW timer with prescaler mode and start value
-      // prescaler field is used as mode for HW: 1=external clock, 2-5=internal prescale
+      // Convert prescaler value (1,8,64,256,1024) to mode (1,3,4,5,6) for HW init
       // Pass the startValue (properly masked to bitWidth) as the initial counter value
       uint32_t hw_start_value = (uint32_t)(sv & 0xFFFFFFFFUL);
-      hw_counter_init(hw_id, c.prescaler, hw_start_value);
+      uint8_t prescaler_mode = hwPrescalerToMode(c.prescaler);
+      hw_counter_init(hw_id, prescaler_mode, hw_start_value);
       }
     }
   }
@@ -814,7 +847,8 @@ void counters_reset(uint8_t id) {
     uint8_t hw_id = 4;  // Timer5
     // Reset HW timer to the configured startValue (not just to 0)
     uint32_t hw_start_value = (uint32_t)(sv & 0xFFFFFFFFUL);
-    hw_counter_init(hw_id, c.prescaler, hw_start_value);
+    uint8_t prescaler_mode = hwPrescalerToMode(c.prescaler);
+    hw_counter_init(hw_id, prescaler_mode, hw_start_value);
   }
 
   if (c.overflowReg < NUM_REGS) {
@@ -862,8 +896,31 @@ void counters_print_status() {
     else if (c.hwMode == 5) hwStr = "T5";
 
     // Vis skaleret og rå værdi separat
-    unsigned long val  = (unsigned long)((double)c.counterValue * (double)c.scale);
-    unsigned long raw  = (unsigned long)(c.counterValue & 0xFFFFFFFFULL);
+    // VIGTIGT: Læs fra REGISTRENE, ikke fra c.counterValue
+    // (registrene har korrekt prescaler division for raw, og korrekt scale for value)
+
+    // Læs value fra index register (kan være multi-word for 32-bit)
+    unsigned long val = 0;
+    if (c.regIndex > 0 && c.regIndex < NUM_REGS) {
+      if (c.bitWidth <= 16) {
+        val = holdingRegs[c.regIndex];
+      } else {
+        // 32-bit: læs 2 words
+        val = holdingRegs[c.regIndex] | ((unsigned long)holdingRegs[c.regIndex+1] << 16);
+      }
+    }
+
+    // Læs raw fra raw register (kan være multi-word for 32-bit)
+    unsigned long raw = 0;
+    uint16_t rawRegBase = (c.rawReg > 0) ? c.rawReg : (c.regIndex + 4);
+    if (rawRegBase > 0 && rawRegBase < NUM_REGS) {
+      if (c.bitWidth <= 16) {
+        raw = holdingRegs[rawRegBase];
+      } else {
+        // 32-bit: læs 2 words
+        raw = holdingRegs[rawRegBase] | ((unsigned long)holdingRegs[rawRegBase+1] << 16);
+      }
+    }
 
     // kolonne-for-kolonne print med fast bredde
     Serial.print(' ');

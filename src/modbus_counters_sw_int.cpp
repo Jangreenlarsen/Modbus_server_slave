@@ -102,14 +102,10 @@ void sw_counter_interrupt_handler(uint8_t counter_id) {
     c.lastEdgeMs = millis();
   }
 
-  // Prescaler counter
-  uint16_t pre = (c.prescaler == 0) ? 1 : c.prescaler;
-  if (pre > 1024) pre = 1024;
-  c.edgeCount++;
-  if (c.edgeCount < pre) {
-    return;
-  }
-  c.edgeCount = 0;
+  // REMOVED: SW-ISR mode prescaler via edgeCount (now handled in store_value_to_regs)
+  // SW-ISR mode now counts ALL edges, just like HW mode and SW mode (v3.6.0)
+  // Prescaler division happens only at output (raw register)
+  // This gives consistent behavior across ALL counter modes
 
   // Count step
   uint8_t bw = c.bitWidth;

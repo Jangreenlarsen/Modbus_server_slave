@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Modbus RTU Server v3.2.0** is a production-ready embedded system for Arduino Mega 2560 that implements a complete Modbus RTU slave server with advanced features including TimerEngine, CounterEngine with frequency measurement, and an interactive CLI interface.
+**Modbus RTU Server v3.6.1** is a production-ready embedded system for Arduino Mega 2560 that implements a complete Modbus RTU slave server with advanced features including TimerEngine, CounterEngine with unified prescaler strategy, frequency measurement, and an interactive CLI interface.
 
 ### Key Architecture Components
 
@@ -29,18 +29,28 @@ The codebase is organized into three main execution subsystems:
    - Global status/control registers at configurable indices
    - Runs via `timers_loop()` from main loop
 
-3. **CounterEngine** (`src/modbus_counters.cpp`, `include/modbus_counters.h`) - 4 independent input counters with:
+3. **CounterEngine** (`src/modbus_counters.cpp`, `src/modbus_counters_hw.cpp`, `src/modbus_counters_sw_int.cpp`) - 4 independent counters with:
    - Edge detection (rising/falling/both)
-   - Unified prescaler (1, 4, 16, 64, 256, 1024), direction (up/down), bit width (8/16/32/64)
+   - Unified prescaler (1, 4, 8, 16, 64, 256, 1024), direction (up/down), bit width (8/16/32/64)
    - Float scale factor for value transformation
    - Debounce filtering (configurable ms)
-   - **Three Operating Modes (v3.4.0 refactored)**:
-     - **SW (Polling)**: `hw-mode:sw` - Software polling via discrete inputs (low-frequency, low latency jitter)
-     - **SW-ISR (Interrupt)**: `hw-mode:sw-isr` - Hardware interrupt-driven (high-frequency, deterministic)
-     - **HW (Timer5)**: `hw-mode:hw-t5` - Hardware Timer5 external clock only (pin 46, max ~20 kHz)
-   - **Hardware Limitation**: Arduino Mega 2560 only routes Timer5 external clock to headers. Timer1, Timer3, Timer4 clock inputs are NOT accessible.
-   - Frequency measurement (Hz), separate raw registers, consistent unified prescaler values
-   - Three output registers per counter: index-reg (scaled), raw-reg (unscaled), freq-reg (Hz)
+   - **Three Operating Modes (v3.6.1 unified prescaler strategy)**:
+     - **SW (Polling)**: `hw-mode:sw` - Software polling via discrete inputs
+     - **SW-ISR (Interrupt)**: `hw-mode:sw-isr` - Hardware interrupt-driven (INT0-INT5: pins 2,3,18,19,20,21)
+     - **HW (Timer5)**: `hw-mode:hw-t5` - Hardware Timer5 external clock (pin 2, max ~20 kHz)
+   - **CRITICAL Hardware Limitation (v3.4.7)**:
+     - ATmega2560 Timer5 external clock mode CANNOT use hardware prescaler
+     - Internal prescaler modes count system clock (16MHz), NOT external pulses
+     - Solution: Hardware ALWAYS uses external clock mode, prescaler implemented in software
+   - **Unified Prescaler Strategy (v3.6.0-v3.6.1)**:
+     - ALL modes count EVERY edge/pulse in counterValue
+     - Prescaler division happens ONLY at output (raw register)
+     - Consistent behavior: HW, SW, and SW-ISR all use same prescaler approach
+   - **Three output registers per counter**:
+     - `index-reg`: Scaled value (counterValue × scale) - full precision
+     - `raw-reg`: Prescaled value (counterValue / prescaler) - reduced size for register space
+     - `freq-reg`: Frequency measurement in Hz (0-20000)
+   - Frequency measurement (Hz) updates once per second with validation
    - Runs via `counters_loop()` from main loop
 
 ### Global Data Organization
@@ -53,8 +63,9 @@ The codebase is organized into three main execution subsystems:
 
 - **Configuration Storage** (`include/modbus_core.h`, `src/config_store.cpp`):
   - `PersistConfig` struct holds all runtime config (timers, counters, GPIO, static regs)
-  - EEPROM schema versioning (current v9 with CRC checksum validation)
+  - EEPROM schema versioning (current v10 with CRC checksum validation)
   - Functions: `configLoad()`, `configSave()`, `configDefaults()`, `configApply()`
+  - Note: v3.3.0 moved PersistConfig from stack to global RAM (~1KB) to prevent stack overflow
 
 - **CLI State** (`src/cli_shell.cpp`):
   - Command parser with 256-char buffer
@@ -111,30 +122,60 @@ pio device monitor -p COM3 -b 115200
 ## Code Modification Guidelines
 
 ### Adding Counter Features
+
+**Counter Architecture (v3.6.1 - Unified Prescaler Strategy):**
+
 - Counter configuration is in `CounterConfig` struct (see `modbus_counters.h`)
 - Update `configLoad()`/`configSave()` in `config_store.cpp` if adding new fields
-- New counters output three register types:
-  - `indexReg`: scaled value (counterValue × scale)
-  - `rawReg`: unscaled raw counter value
-  - `freqReg`: frequency measurement in Hz (0-20000)
-- **Unified Prescaler Values (v3.4.0):**
-  - All modes (SW polling, SW-ISR, HW Timer5) support: **1, 4, 16, 64, 256, 1024**
-  - **1** = No prescale (every edge counts / external clock on Timer5)
-  - **4, 16, 64, 256** = Internal prescale factors
-  - **1024** = Maximum prescale (divide by 1024)
-- **Counter Setup Workflow:**
-  1. **SW (Polling) Mode**: `set counter <id> mode 1 parameter hw-mode:sw input-dis:<N> ...`
-     - Uses discrete input index for polling
-     - User can optionally map GPIO: `gpio map <pin> input <N>`
-  2. **SW-ISR Mode**: `set counter <id> mode 1 parameter hw-mode:sw-isr input-dis:<N> interrupt-pin:<INT> ...`
-     - Requires GPIO mapping: `gpio map <INT_PIN> input <N>` (must use INT0-INT5 pins: 2,3,18,19,20,21)
-     - Validates mapping exists before enabling
-     - Error if mapping missing: `gpio map 21 input 13`
-  3. **HW Timer5 Mode**: `set counter <id> mode 1 parameter hw-mode:hw-t5 input-dis:<N> ...`
-     - Automatic GPIO mapping to pin 46 (T5)
-- ScaleFloat can be used in all modes for output scaling
-- CLI parsing in `cli_shell.cpp` uses `set counter <id> mode 1 parameter ...` syntax
-- Frequency measurement runs every second with validation (timing window 1-2sec, delta validation, clamping 0-20kHz)
+
+**Three Output Registers (IMPORTANT):**
+  - `index-reg` (value): Scaled value = counterValue × scale (FULL precision, NO prescaler division)
+  - `raw-reg`: Prescaled value = counterValue / prescaler (reduced size for register space)
+  - `freq-reg`: Frequency in Hz (0-20000), measured once per second
+
+**Unified Prescaler Strategy (v3.6.0-v3.6.1):**
+  - **ALL modes count EVERY edge/pulse** - no skipping!
+  - HW mode: Hardware counts all pulses → raw = counterValue / prescaler
+  - SW mode: Software counts all edges → raw = counterValue / prescaler
+  - SW-ISR mode: ISR counts all edges → raw = counterValue / prescaler
+  - **Prescaler division happens ONLY in `store_value_to_regs()`** (one place)
+  - Supported values: **1, 4, 8, 16, 64, 256, 1024**
+  - **Example:** prescaler=64, 76800 edges → counterValue=76800, value=76800, raw=1200
+
+**CRITICAL: ATmega2560 Timer5 Hardware Limitation (v3.4.7):**
+  - External clock mode (TCCR5B=0x07): Counts pulses on T5 pin, NO hardware prescaler
+  - Internal prescaler modes (TCCR5B=0x02-0x05): Count 16MHz system clock, IGNORE T5 pin!
+  - **Solution:** Hardware ALWAYS uses external clock mode (counts all pulses)
+  - Prescaler implemented 100% in software (division at output only)
+
+**Counter Setup Workflow:**
+  1. **SW (Polling) Mode**: `set counter <id> mode 1 parameter hw-mode:sw input-dis:<N> prescaler:<P> ...`
+     - Polls discrete input via `di_read()`
+     - Counts every edge (no skipping)
+     - User can map GPIO: `gpio map <pin> input <N>`
+
+  2. **SW-ISR (Interrupt) Mode**: `set counter <id> mode 1 parameter hw-mode:sw-isr interrupt-pin:<PIN> prescaler:<P> ...`
+     - Hardware interrupts on pins 2,3,18,19,20,21 (INT0-INT5)
+     - ISR counts every edge immediately (deterministic, no polling delay)
+     - Must use valid interrupt pins
+     - Example: `set counter 1 mode 1 parameter hw-mode:sw-isr interrupt-pin:21 prescaler:64 index-reg:40 raw-reg:44`
+
+  3. **HW (Timer5) Mode**: `set counter <id> mode 1 parameter hw-mode:hw-t5 prescaler:<P> ...`
+     - Uses Timer5 external clock on pin 2 (PE4/T5)
+     - Hardware counts all pulses (external clock mode only)
+     - Auto-maps GPIO pin 2 to discrete input
+     - Max frequency ~20 kHz
+
+**ScaleFloat:**
+  - Applied to value register: `value = counterValue × scale`
+  - Does NOT affect raw register (raw = counterValue / prescaler only)
+  - Example: scale=0.5, prescaler=64, 76800 edges → value=38400, raw=1200
+
+**Frequency Measurement:**
+  - Updates once per second (1-2 sec timing window)
+  - Direct Hz measurement (no prescaler compensation needed)
+  - Validation: delta check, overflow detection, clamping 0-20kHz
+  - Works identically in all three modes
 
 ### Adding Timer Features
 - Timer configuration in `TimerConfig` struct (see `modbus_timers.h`)
@@ -143,10 +184,11 @@ pio device monitor -p COM3 -b 115200
 - Each timer updates bits in global status register independently
 
 ### Modifying EEPROM Schema
-- Current schema version: **v9** (see `modbus_core.h` and `version.h`)
+- Current schema version: **v10** (see `modbus_core.h` and `version.h`)
 - All configuration changes require schema bump
 - `configLoad()` validates CRC16 checksum; if invalid, defaults are used
 - Migration path: add new fields to `PersistConfig`, update version number, handle old versions in load function
+- Note: Runtime fields (counterValue, edgeCount, etc.) are cleared before save (v3.3.5)
 
 ### Modbus Function Code Implementation
 - FC implementations in `modbus_fc.cpp` use utility functions:
@@ -174,27 +216,51 @@ pio device monitor -p COM3 -b 115200
 | `src/modbus_core.cpp` | Frame reception, parsing, CRC validation |
 | `src/modbus_tx.cpp` | Response transmission, RS-485 direction control |
 | `src/modbus_timers.cpp` | TimerEngine implementation (4 independent timers) |
-| `src/modbus_counters.cpp` | CounterEngine implementation (4 counters, freq measurement) |
+| `src/modbus_counters.cpp` | CounterEngine main (SW/HW mode, prescaler logic, freq measurement) |
+| `src/modbus_counters_hw.cpp` | HW counter implementation (Timer5 ISRs, external clock mode) |
+| `src/modbus_counters_sw_int.cpp` | SW-ISR counter (INT0-INT5 interrupt handlers) |
+| `include/modbus_counters.h` | CounterConfig struct, counter constants |
+| `include/modbus_counters_hw.h` | HW counter interface |
+| `include/modbus_counters_sw_int.h` | SW-ISR counter interface |
 | `src/config_store.cpp` | EEPROM load/save/defaults, config persistence |
 | `src/cli_shell.cpp` | Interactive CLI command parsing and execution |
 | `src/status_info.cpp` | Status display helpers (`show config`, `show counters`, etc.) |
-| `include/version.h` | Version string, build date |
+| `include/version.h` | Version string, build date, complete changelog |
 
 ## Resource Constraints
 
-- **RAM**: 56.8% of 8 KB used (4655 bytes) - comfortable headroom
-- **Flash**: 20.1% of 256 KB used (51058 bytes) - plenty of room for features
-- **EEPROM**: 4 KB - stores PersistConfig with CRC
+- **RAM**: 83.5% of 8 KB used (6841 bytes) - acceptable (v3.3.0 moved PersistConfig to global RAM)
+  - Note: RAM increased from 56.8% (v3.2.0) to 82.4% (v3.3.0) due to stack overflow fix
+  - Still 1.3 KB free for runtime operations
+- **Flash**: 27.2% of 256 KB used (68994 bytes) - plenty of room for features
+- **EEPROM**: 4 KB - stores PersistConfig with CRC (schema v10)
 - **Timers**: 4 maximum (hardware constraint)
 - **Counters**: 4 maximum (hardware constraint)
+  - 3 operating modes per counter: SW, SW-ISR, HW
 - **Frequency measurement**: 0-20 kHz range (by design)
+- **Interrupt pins**: 6 available (INT0-INT5: pins 2,3,18,19,20,21)
 
 ## Backward Compatibility Notes
 
-- **v3.2.0** introduced consistent parameter naming (index-reg, raw-reg, freq-reg) but maintains backward compatibility with old names (reg, count-reg, raw, overload, control-reg, input)
-- CLI parser accepts both new and old parameter names
-- EEPROM schema migrations happen automatically on load
-- Frequency measurement feature added without breaking existing counter functionality
+- **v3.6.0-v3.6.1 BREAKING CHANGE:** Counter prescaler behavior changed fundamentally
+  - **OLD (v3.5.9 and earlier):** SW/SW-ISR modes used edgeCount to skip edges (counterValue prescaled)
+  - **NEW (v3.6.0+):** ALL modes count EVERY edge/pulse (counterValue NOT prescaled)
+  - **Impact:** SW/SW-ISR counters will count 64× more for prescaler=64
+  - **Migration:** Existing SW/SW-ISR counters will reset to 0 after upgrade
+  - **Benefit:** Consistent behavior across HW, SW, and SW-ISR modes
+
+- **v3.4.7 BREAKING CHANGE:** HW mode Timer5 prescaler now software-only
+  - **OLD:** Hardware prescaler modes tried to use internal prescaler (WRONG - counted system clock)
+  - **NEW:** Hardware ALWAYS uses external clock mode, prescaler division in software only
+  - **Impact:** HW counters behavior more predictable and correct
+
+- **v3.2.0** introduced consistent parameter naming (index-reg, raw-reg, freq-reg)
+  - Maintains backward compatibility with old names
+  - CLI parser accepts both new and old parameter names
+
+- **EEPROM schema** migrations happen automatically on load
+  - Schema v10 (current) handles all previous versions
+  - Runtime fields cleared before save to prevent state persistence bugs
 
 ## Testing Considerations
 

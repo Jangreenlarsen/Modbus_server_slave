@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8" />
+<title>Modbus RTU Server v3.6.1 – Unified Prescaler Architecture Manual</title>
+<style>
+body {font-family: system-ui, sans-serif; line-height:1.6; max-width:1200px; margin:auto; padding:2rem; background:#f7f7f9; color:#222;}
+h1,h2,h3,h4{color:#222; margin-top:1.5rem;}
+h1{border-bottom:3px solid #004a99; padding-bottom:0.5rem;}
+h2{border-bottom:1px solid #ccc; padding-bottom:0.3rem;}
+code{background:#e8e8e8;padding:0.1rem 0.3rem;border-radius:3px; font-family:monospace;}
+pre{background:#dde1e7;color:#111;padding:1rem;border-radius:4px;overflow-x:auto; font-family:monospace; font-size:0.9rem;}
+table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:0.9rem;}
+th,td{border:1px solid #ccc;padding:0.4rem 0.6rem;text-align:left;vertical-align:top;}
+th{background:#e9e9ef; font-weight:bold;}
+.note{padding:0.8rem 1rem;background:#eef7ff;border-left:4px solid #005bbb;margin:1rem 0; border-radius:3px;}
+.warning{padding:0.8rem 1rem;background:#fff3cd;border-left:4px solid #ff9800;margin:1rem 0; border-radius:3px;}
+.critical{padding:0.8rem 1rem;background:#ffebee;border-left:4px solid #d32f2f;margin:1rem 0; border-radius:3px;}
+.quickref{background:#ddeeff;padding:1rem;border-left:4px solid #004a99;margin:1rem 0;border-radius:4px;}
+.toc{background:#f0f0f0;padding:1rem;border-left:4px solid #666;margin:1rem 0;border-radius:3px;}
+hr{margin:2rem 0; border:none; border-top:1px solid #ccc;}
+ul,ol{margin:0.5rem 0; padding-left:2rem;}
+li{margin:0.3rem 0;}
+.version-badge{display:inline-block; background:#005bbb; color:white; padding:0.3rem 0.6rem; border-radius:3px; font-size:0.9rem; margin-left:0.5rem;}
+.breaking-change{display:inline-block; background:#d32f2f; color:white; padding:0.2rem 0.5rem; border-radius:2px; font-size:0.8rem; margin:0 0.3rem;}
+</style>
+</head>
+<body>
+
+<h1>Modbus RTU Server v3.6.1 – Unified Prescaler Architecture Manual<span class="version-badge">v3.6.1</span></h1>
+
+<p><strong>Status:</strong> ✅ Production Ready</p>
+<p><strong>Build Date:</strong> 2025-11-14</p>
+<p><strong>Platform:</strong> Arduino Mega 2560 (ATmega2560 @ 16 MHz)</p>
+<p><strong>EEPROM Schema:</strong> v10 (HW/SW counter support)</p>
+<p><strong>Resource Usage:</strong> RAM: 83.5% (6841 / 8192 bytes) | Flash: 27.2% (68994 / 253952 bytes)</p>
+
+<div class="critical">
+<b>🔴 BREAKING CHANGES in v3.6.0-v3.6.1</b><br>
+Prescaler behavior changed fundamentally across ALL counter modes (HW, SW, SW-ISR):<br>
+<b>OLD:</b> SW/SW-ISR modes used edge skipping (counted fewer edges)<br>
+<b>NEW:</b> ALL modes count EVERY edge, prescaler division at output only<br>
+<b>Impact:</b> SW/SW-ISR counters will show different values after upgrade<br>
+<b>Benefit:</b> Unified consistent behavior across all modes
+</div>
+
+<div class="quickref">
+<b>📋 Quick Access</b>
+<ol>
+  <li><a href="#intro">Introduktion</a></li>
+  <li><a href="#hardware">Hardware Setup</a></li>
+  <li><a href="#quickstart">Quick Start</a></li>
+  <li><a href="#counter">Counter Engine v6 (HW/SW/SW-ISR)</a></li>
+  <li><a href="#timer">Timer Engine v2</a></li>
+  <li><a href="#gpio">GPIO Management</a></li>
+  <li><a href="#cliref">CLI Command Reference</a></li>
+  <li><a href="#modbus">Modbus Register Reference</a></li>
+  <li><a href="#examples">Practical Examples</a></li>
+  <li><a href="#troubleshooting">Troubleshooting</a></li>
+  <li><a href="#versions">Version History</a></li>
+</ol>
+</div>
+
+<hr>
+
+<h2 id="intro">Introduktion</h2>
+
+<p>Modbus RTU Server v3.6.1 er et production-ready embedded system for Arduino Mega 2560, der implementerer en fuldstændig Modbus RTU slave server med avancerede features:</p>
+
+<ul>
+  <li><strong>Modbus RTU Server:</strong> Komplet protokol-implementering med RS-485 support</li>
+  <li><strong>Counter Engine v6:</strong> 4 uafhængige tællere med UNIFIED prescaler (HW, SW, SW-ISR modes)</li>
+  <li><strong>Timer Engine v2:</strong> 4 uafhængige programmérbare timere (4 modes)</li>
+  <li><strong>Interactive CLI:</strong> Cisco-style shell over USB serial</li>
+  <li><strong>EEPROM Persistence:</strong> Konfiguration gemt i non-volatile memory (schema v10)</li>
+</ul>
+
+<h3>Nyheder i v3.6.1</h3>
+
+<ul>
+  <li><strong>🔧 SW-ISR Mode Prescaler Fix</strong> – Fjernet dobbelt prescaling fra interrupt-baseret mode</li>
+  <li><strong>✅ Unified Prescaler Strategy</strong> – HW, SW, og SW-ISR modes 100% konsistente</li>
+  <li><strong>📊 Production Ready</strong> – Alle tre counter modes testet og verified</li>
+</ul>
+
+<h3>Nyheder i v3.6.0</h3>
+
+<ul>
+  <li><strong>🆕 SW Mode Prescaler Fix</strong> – Fjernet edgeCount dobbelt tælling, nu unified med HW</li>
+  <li><strong>✅ CRITICAL FIX:</strong> Discovered ATmega2560 Timer5 hardware limitation (v3.4.7) – no hardware prescaler on external clock</li>
+  <li><strong>📊 Software Prescaler 100%</strong> – ALL prescaler division happens at output only</li>
+</ul>
+
+<h3>Nyheder i v3.3.0</h3>
+
+<ul>
+  <li><strong>🆕 Hardware Counter Mode</strong> – Direkte hardware timer input (T1/T3/T4/T5 på pins 5/47/6/2)</li>
+  <li><strong>🆕 Software/Interrupt Counter Modes</strong> – GPIO pin-baseret edge detection (SW og SW-ISR)</li>
+  <li><strong>🆕 Automatic GPIO Management</strong> – DYNAMIC mappings for HW counters</li>
+</ul>
+
+<hr>
+
+<h2 id="hardware">Hardware Setup</h2>
+
+<h3>Board Configuration</h3>
+
+<table>
+<thead><tr><th>Specification</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Platform</td><td>Arduino Mega 2560 (ATmega2560 @ 16 MHz)</td></tr>
+<tr><td>RAM</td><td>8 KB (83.5% used, 1.3 KB free)</td></tr>
+<tr><td>Flash</td><td>256 KB (27.2% used)</td></tr>
+<tr><td>EEPROM</td><td>4 KB (configuration storage)</td></tr>
+</tbody>
+</table>
+
+<h3>Pin Assignments</h3>
+
+<table>
+<thead><tr><th>Pin(s)</th><th>Function</th><th>Purpose</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>0–1</td><td>USB Serial</td><td>Debug CLI @ 115200 baud</td><td>Don't map as GPIO</td></tr>
+<tr><td>18–19</td><td>Modbus RTU (Serial1)</td><td>RS-485 data</td><td>Reserved for Modbus</td></tr>
+<tr><td>8</td><td>RS-485 DIR Pin</td><td>Transceiver direction control</td><td>Do not use for GPIO</td></tr>
+<tr><td>13</td><td>LED Heartbeat</td><td>1 Hz toggle indicator</td><td>User LED output</td></tr>
+<tr><td><strong>5</strong></td><td><strong>Timer1 (HW Counter)</strong></td><td><strong>Hardware input (ICP1)</strong></td><td><strong>HW mode only</strong></td></tr>
+<tr><td><strong>47</strong></td><td><strong>Timer3 (HW Counter)</strong></td><td><strong>Hardware input (ICP3)</strong></td><td><strong>HW mode only</strong></td></tr>
+<tr><td><strong>6</strong></td><td><strong>Timer4 (HW Counter)</strong></td><td><strong>Hardware input (ICP4)</strong></td><td><strong>HW mode only</strong></td></tr>
+<tr><td><strong>2</strong></td><td><strong>Timer5 (HW Counter)</strong></td><td><strong>Hardware input (ICP5)</strong></td><td><strong>HW mode only (CRITICAL: NOT pin 46!)</strong></td></tr>
+<tr><td>2-4, 7, 9-12, 14-17, 20-45, 48-53</td><td>GPIO</td><td>Available for digital I/O</td><td>Use for SW counters, timers, mappings</td></tr>
+<tr><td><strong>2, 3, 18, 19, 20, 21</strong></td><td><strong>INT0-INT5 (Interrupts)</strong></td><td><strong>SW-ISR mode pins</strong></td><td><strong>External interrupts for ISR counters</strong></td></tr>
+</tbody>
+</table>
+
+<div class="critical">
+<b>🔴 CRITICAL: Timer5 Pin Mapping (v3.4.3 Fix)</b><br>
+Timer5 external clock uses <b>pin 2</b> (PE4), NOT pin 46!<br>
+This was discovered through hardware testing and verified working.
+</div>
+
+<h3>RS-485 Wiring</h3>
+
+<table>
+<thead><tr><th>Arduino Mega 2560</th><th>RS-485 Module</th><th>Function</th></tr></thead>
+<tbody>
+<tr><td>Pin 18 (TX1)</td><td>DI</td><td>Data transmit</td></tr>
+<tr><td>Pin 19 (RX1)</td><td>RO</td><td>Data receive</td></tr>
+<tr><td>Pin 8</td><td>DE + RE</td><td>Driver/Receiver enable</td></tr>
+<tr><td>VCC</td><td>VCC</td><td>5V power</td></tr>
+<tr><td>GND</td><td>GND</td><td>Ground</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2 id="quickstart">Quick Start</h2>
+
+<h3>1. Build and Upload</h3>
+
+<pre><code>cd Modbus_server_slave
+code .                    # Open in VS Code
+pio run                   # Build firmware
+pio run -t upload         # Upload to Arduino
+pio device monitor        # Monitor serial output
+</code></pre>
+
+<h3>2. Initial Configuration</h3>
+
+<pre><code>CLI                       # Enter CLI mode (type at serial monitor)
+set hostname mymodbus     # Set CLI prompt
+set slaveid 1             # Set Modbus slave ID
+set baudrate 9600         # Set RS-485 baudrate
+save                      # Save to EEPROM
+</code></pre>
+
+<h3>3. Configure Counter with Frequency Measurement</h3>
+
+<h4>Hardware Mode (Recommended - Most Accurate)</h4>
+
+<pre><code>; Counter 1 on Timer1 (pin 5) – Direct hardware input
+set counter 1 mode 1 parameter \
+  hw-mode:hw-t5 \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:100 \
+  raw-reg:104 \
+  freq-reg:108 \
+  ctrl-reg:130 \
+  input-dis:125 \
+  direction:up \
+  scale:1.0
+
+; Enable auto-start
+set counter 1 start enable
+
+; Save configuration
+save
+
+; View status
+show counters
+; pin column shows: 5 (hardware GPIO pin)
+; hz column updates every second
+</code></pre>
+
+<h4>Software-ISR Mode (Interrupt-Based, High-Frequency)</h4>
+
+<pre><code>; Counter 2 on GPIO pin 2 (INT0) – Software interrupt mode
+set counter 2 mode 1 parameter \
+  hw-mode:sw-isr \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:110 \
+  raw-reg:114 \
+  freq-reg:118 \
+  ctrl-reg:131 \
+  input-dis:20 \
+  direction:up \
+  scale:1.0
+
+; Map GPIO pin 2 to discrete input 20 (required for ISR mode)
+gpio map 2 input 20
+
+; Enable auto-start
+set counter 2 start enable
+
+; Save
+save
+</code></pre>
+
+<h4>Software Polling Mode (GPIO-Based)</h4>
+
+<pre><code>; Counter 3 on GPIO pin 22 – Software polling mode
+set counter 3 mode 1 parameter \
+  hw-mode:sw \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:120 \
+  raw-reg:124 \
+  freq-reg:128 \
+  ctrl-reg:132 \
+  input-dis:30 \
+  direction:up \
+  scale:1.0 \
+  debounce:on \
+  debounce-ms:50
+
+; Map GPIO pin 22 to discrete input 30
+gpio map 22 input 30
+
+; Enable auto-start
+set counter 3 start enable
+
+; Save
+save
+</code></pre>
+
+<hr>
+
+<h2 id="counter">Counter Engine v6 (Unified Prescaler Architecture)</h2>
+
+<h3>Overview</h3>
+
+<p>Counter Engine v6 er et hybrid-system som understøtter tre uafhængige counter modes med <strong>UNIFIED prescaler strategi</strong> (v3.6.0+):</p>
+
+<ul>
+  <li><strong>Hardware Mode (HW):</strong> Direkte timer input capture fra hardware timere T1/T3/T4/T5</li>
+  <li><strong>Software-ISR Mode (SW-ISR):</strong> Interrupt-baseret edge detection (INT0-INT5: pins 2,3,18,19,20,21)</li>
+  <li><strong>Software Mode (SW):</strong> Polling-baseret GPIO pin edge detection</li>
+</ul>
+
+<h3>Unified Prescaler Strategy (v3.6.0+)</h3>
+
+<div class="critical">
+<b>🔴 CRITICAL ARCHITECTURE CHANGE (v3.6.0-v3.6.1)</b><br>
+All modes (HW, SW, SW-ISR) now use <b>identical prescaler approach</b>:<br>
+✅ ALL modes count EVERY edge/pulse in counterValue<br>
+✅ Prescaler division happens ONLY at output (raw register)<br>
+✅ Consistent: HW, SW, SW-ISR all identical<br>
+<br>
+<b>Previous (OLD v3.5.9 and earlier):</b><br>
+❌ SW/SW-ISR: Used edge skipping (counted fewer pulses)<br>
+❌ HW: Divided at output (counted all pulses)<br>
+❌ Result: Inconsistent behavior between modes<br>
+<br>
+<b>Discovery: ATmega2560 Timer5 Hardware Limitation (v3.4.7)</b><br>
+External clock mode CANNOT use hardware prescaler!<br>
+• External clock (TCCR5B=0x07): Counts pulses, no prescaler available<br>
+• Internal prescaler modes (0x02-0x05): Count system clock 16MHz, IGNORE pulses!<br>
+• Solution: 100% software prescaler implementation for all modes
+</div>
+
+<h3>Register Architecture</h3>
+
+<table>
+<thead><tr><th>Register</th><th>Calculation</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>index-reg</code></td><td>counterValue × scale</td><td>Scaled application value (full precision, NO prescaler)</td></tr>
+<tr><td><code>raw-reg</code></td><td>counterValue / prescaler</td><td>Reduced size for register space (WITH prescaler division)</td></tr>
+<tr><td><code>freq-reg</code></td><td>Direct Hz measurement</td><td>Frequency 0-20000 Hz (no compensation)</td></tr>
+</tbody>
+</table>
+
+<h3>Example with Prescaler=64, 76,800 Edges Input</h3>
+
+<table>
+<thead><tr><th>Mode</th><th>counterValue</th><th>value (reg)</th><th>raw (reg)</th><th>Behavior</th></tr></thead>
+<tbody>
+<tr><td>HW T5</td><td>76,800</td><td>76,800</td><td>1,200</td><td>Hardware counts all edges, raw divided</td></tr>
+<tr><td>SW Polling</td><td>76,800</td><td>76,800</td><td>1,200</td><td>Software counts all edges, raw divided</td></tr>
+<tr><td>SW-ISR</td><td>76,800</td><td>76,800</td><td>1,200</td><td>ISR counts all edges, raw divided</td></tr>
+</tbody>
+</table>
+
+<h3>Hardware Mode (HW)</h3>
+
+<h4>Fordele</h4>
+
+<ul>
+  <li>✅ <strong>Direkte Hardware Input</strong> – Bruger Arduino timer input capture pins (ICP1, ICP3, ICP4, ICP5)</li>
+  <li>✅ <strong>Ingen Software Overhead</strong> – Hardware tæller edges uafhængigt</li>
+  <li>✅ <strong>Præcis Frekvens Måling</strong> – Stabil frekvens måling selv under Modbus trafik</li>
+  <li>✅ <strong>Bedst for Høj-Frekvens</strong> – Ideal til 1-20 kHz signaler</li>
+</ul>
+
+<h4>Timer Selection</h4>
+
+<table>
+<thead><tr><th>Timer</th><th>GPIO Pin</th><th>Use Case</th><th>Interrupt</th></tr></thead>
+<tbody>
+<tr><td>T1</td><td>5</td><td>Frequency input</td><td>N/A</td></tr>
+<tr><td>T3</td><td>47</td><td>High-speed counting</td><td>N/A</td></tr>
+<tr><td>T4</td><td>6</td><td>Frequency measurement</td><td>N/A</td></tr>
+<tr><td>T5</td><td>2</td><td>General input capture</td><td>N/A</td></tr>
+</tbody>
+</table>
+
+<h3>Software-ISR Mode (SW-ISR)</h3>
+
+<h4>Fordele</h4>
+
+<ul>
+  <li>✅ <strong>High-Frequency Capable:</strong> Interrupt-driven, better timing precision than polling</li>
+  <li>✅ <strong>Flexibel GPIO:</strong> Brug INT0-INT5 pins (2, 3, 18, 19, 20, 21)</li>
+  <li>✅ <strong>Deterministic Edge Detection:</strong> Hardware interrupt triggered</li>
+  <li>✅ <strong>Suitable for Medium Frequencies:</strong> 5-20 kHz possible</li>
+</ul>
+
+<h4>Begrænsninger</h4>
+
+<ul>
+  <li>❌ <strong>Kun 6 pins:</strong> Only INT0-INT5 (pins 2, 3, 18, 19, 20, 21) available</li>
+  <li>❌ <strong>GPIO Mapping Required:</strong> Shall manually map interrupt pin to discrete input</li>
+  <li>❌ <strong>Debounce not available:</strong> ISR triggers on every edge (hardware dependent)</li>
+</ul>
+
+<h4>Configuration Example (SW-ISR Mode)</h4>
+
+<pre><code>; Counter 2 on INT0 (pin 2) – Software-ISR mode
+set counter 2 mode 1 parameter \
+  hw-mode:sw-isr \
+  count-on:rising \
+  res:32 \
+  prescaler:1 \
+  index-reg:110 \
+  raw-reg:114 \
+  freq-reg:118 \
+  ctrl-reg:131 \
+  input-dis:20 \
+  direction:up \
+  scale:1.0
+
+; Map GPIO pin 2 (INT0) to discrete input 20 (REQUIRED!)
+gpio map 2 input 20
+
+; Verify mapping
+show config
+; Expected: gpio 2 at input 20
+
+; Enable auto-start
+set counter 2 start enable
+
+; Save
+save
+</code></pre>
+
+<h3>Software Mode (SW)</h3>
+
+<h4>Fordele</h4>
+
+<ul>
+  <li>✅ <strong>Flexibel GPIO:</strong> Brug hvilken som helst digital pin (2-53 undtagen reserverede)</li>
+  <li>✅ <strong>Debounce Filtering:</strong> Built-in noise filtering (1-255 ms)</li>
+  <li>✅ <strong>Variable Mapping:</strong> Skift GPIO pins via <code>gpio map</code> kommando</li>
+  <li>✅ <strong>Suited for Slow Signals:</strong> Perfekt for lav-frekvens inputs</li>
+</ul>
+
+<h4>Begrænsninger</h4>
+
+<ul>
+  <li>❌ <strong>Mindre Præcis:</strong> Software-baseret polling har jitter</li>
+  <li>❌ <strong>Lavere Max Frekvens:</strong> ~5 kHz maksimum (software-begrænset)</li>
+  <li>❌ <strong>Kræver GPIO Mapping:</strong> Skal manuelt mappes via <code>gpio map</code></li>
+</ul>
+
+<h3>Frequency Measurement Algorithm</h3>
+
+<pre><code>1. Measure raw counter delta over 1-2 second window
+2. Validate delta against max 100 kHz threshold
+3. Detect overflow wrap-around (for 32/64-bit widths)
+4. Calculate: Hz = (delta_count × prescaler) / window_seconds
+5. Clamp result to 0-20000 Hz range
+6. Reset on counter overflow or 5-second idle timeout
+</code></pre>
+
+<h4>Frequency Features</h4>
+
+<ul>
+  <li><strong>Window:</strong> 1-2 second measurement window</li>
+  <li><strong>Delta Validation:</strong> Max 100 kHz accepted (higher = rejected)</li>
+  <li><strong>Overflow Detection:</strong> Handles counter bit-width wraparound</li>
+  <li><strong>Clamping:</strong> Result forced to 0-20000 Hz range</li>
+  <li><strong>Stability:</strong> Immune to Modbus read traffic</li>
+  <li><strong>Reset:</strong> Auto-resets on counter reset, overflow, or timeout</li>
+</ul>
+
+<h3>Control Register (ctrlReg)</h3>
+
+<p>Control register er et Modbus holding register med bit-level kontrol:</p>
+
+<table>
+<thead><tr><th>Bit</th><th>Navn</th><th>Funktion</th><th>Mode</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Reset</td><td>Sæt til 1 for at nulstille counter til start-value</td><td>W</td></tr>
+<tr><td>1</td><td>Start</td><td>Sæt til 1 for at enable counter (start counting)</td><td>W</td></tr>
+<tr><td>2</td><td>Stop</td><td>Sæt til 1 for at disable counter (stop counting)</td><td>W</td></tr>
+<tr><td>3</td><td>Reset-on-Read</td><td>Auto-reset efter Modbus read (persistent)</td><td>R/W</td></tr>
+<tr><td>4-15</td><td>Reserved</td><td>Not used</td><td>-</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2 id="timer">Timer Engine v2</h2>
+
+<h3>Overview</h3>
+
+<p><strong>TimerEngine v2</strong> styrer coils ud fra tidsintervaller. Systemet har 4 timere (ID 1–4), hver med sin egen mode og parametre.</p>
+
+<h3>Timer Modes</h3>
+
+<table>
+<thead><tr><th>Mode</th><th>Navn</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>One-shot</td><td>Kører én sekvens: P1 i T1, P2 i T2, P3 i T3, derefter stopper</td></tr>
+<tr><td>2</td><td>Monostable</td><td>Monostabil: trigger starter puls af længde T1. Ny trigger forlænger tiden</td></tr>
+<tr><td>3</td><td>Astable</td><td>Astabil "blink": ON i T1, OFF i T2, gentagelse kontinuerligt</td></tr>
+<tr><td>4</td><td>Input-triggered</td><td>Trigges af digitalt input edge. Hver edge starter sekvens på coil</td></tr>
+</tbody>
+</table>
+
+<hr>
+
+<h2 id="gpio">GPIO Management</h2>
+
+<h3>Hardware Counter GPIO (DYNAMIC)</h3>
+
+<p>Hardware counters automatisk mapper GPIO pins (read-only, DYNAMIC):</p>
+
+<pre><code>show config
+
+; Output:
+; GPIO Mappings:
+;   gpio 5 DYNAMIC at input 125 (counter1 HW-T1)
+;   gpio 47 DYNAMIC at input 126 (counter2 HW-T3)
+;   gpio 6 DYNAMIC at input 127 (counter3 HW-T4)
+;   gpio 2 DYNAMIC at input 128 (counter4 HW-T5)
+</code></pre>
+
+<h3>Manual GPIO Mapping</h3>
+
+<h4>Syntax</h4>
+
+<pre><code>; Map GPIO pin to discrete input (for SW counters)
+gpio map <pin> input <index>
+
+; Map GPIO pin to coil (output)
+gpio map <pin> coil <index>
+
+; Remove mapping
+gpio unmap <pin>
+
+; View all mappings
+show gpio
+</code></pre>
+
+<hr>
+
+<h2 id="cliref">CLI Command Reference</h2>
+
+<h3>System Commands</h3>
+
+<table>
+<thead><tr><th>Command</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>show config</code></td><td>Display complete configuration</td></tr>
+<tr><td><code>show version</code></td><td>Show firmware version and build info</td></tr>
+<tr><td><code>show counters</code></td><td>Display all counter status with frequency</td></tr>
+<tr><td><code>show timers</code></td><td>Display all timer status</td></tr>
+<tr><td><code>show gpio</code></td><td>Display all GPIO mappings</td></tr>
+<tr><td><code>set hostname <name></code></td><td>Set CLI prompt hostname</td></tr>
+<tr><td><code>set slaveid <id></code></td><td>Set Modbus slave ID (1-247)</td></tr>
+<tr><td><code>set baudrate <baud></code></td><td>Set Modbus RTU baudrate</td></tr>
+<tr><td><code>save</code></td><td>Save configuration to EEPROM</td></tr>
+<tr><td><code>load</code></td><td>Load configuration from EEPROM</td></tr>
+<tr><td><code>reboot</code></td><td>Restart microcontroller</td></tr>
+</tbody>
+</table>
+
+<h3>Counter Configuration Syntax</h3>
+
+<pre><code>set counter <id> mode 1 parameter \
+  hw-mode:<sw|sw-isr|hw-t1|hw-t3|hw-t4|hw-t5> \
+  count-on:<rising|falling|both> \
+  start-value:<n> \
+  res:<8|16|32|64> \
+  prescaler:<1-1024> \
+  index-reg:<0-159> \
+  raw-reg:<0-159> \
+  freq-reg:<0-159> \
+  overload-reg:<0-159> \
+  ctrl-reg:<0-159> \
+  input-dis:<0-255> \
+  direction:<up|down> \
+  scale:<float> \
+  debounce:<on|off> \
+  debounce-ms:<1-255>
+</code></pre>
+
+<div class="note">
+<b>Prescaler Values (v3.6.0+ Unified):</b><br>
+ALL modes support: <b>1, 4, 8, 16, 64, 256, 1024</b><br>
+• 1 = No prescale (every edge counts)<br>
+• 4, 8, 16, 64, 256 = Internal prescale factors<br>
+• 1024 = Maximum prescale
+</div>
+
+<hr>
+
+<h2 id="modbus">Modbus Register Reference</h2>
+
+<h3>Counter Registers (Typical Assignment)</h3>
+
+<pre><code>Counter 1:
+  100: index-reg (scaled value)
+  104: raw-reg (unscaled value)
+  108: freq-reg (frequency Hz)
+  120: overload-reg (overflow flag)
+  130: ctrl-reg (control bits)
+
+Counter 2:
+  110: index-reg
+  114: raw-reg
+  118: freq-reg
+  121: overload-reg
+  131: ctrl-reg
+</code></pre>
+
+<h3>Control Register Bits</h3>
+
+<pre><code>Bit 0: Reset (W)            - Set to 1 to reset
+Bit 1: Start (W)            - Set to 1 to enable
+Bit 2: Stop (W)             - Set to 1 to disable
+Bit 3: ResetOnRead (R/W)    - Auto-reset on Modbus read
+Bits 4-15: Reserved         - Do not use
+</code></pre>
+
+<hr>
+
+<h2 id="examples">Practical Examples</h2>
+
+<h3>Example 1: Frequency Measurement (HW Mode)</h3>
+
+<p><strong>Scenario:</strong> Measure 1 kHz signal using Timer5 (pin 2)</p>
+
+<pre><code>CLI
+
+; Configure counter 1 on Timer5
+set counter 1 mode 1 parameter \
+  hw-mode:hw-t5 \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:100 \
+  raw-reg:104 \
+  freq-reg:108 \
+  ctrl-reg:130 \
+  input-dis:125 \
+  direction:up \
+  scale:1.0
+
+; Enable auto-start
+set counter 1 start enable
+
+; View configuration
+show config
+; GPIO Mappings:
+;   gpio 2 DYNAMIC at input 125 (counter1 HW-T5)
+
+; Save
+save
+
+; View status
+show counters
+; pin column: 2
+; hz column: updates every second
+</code></pre>
+
+<h3>Example 2: Software-ISR Counter with High Frequency</h3>
+
+<p><strong>Scenario:</strong> Count pulses on INT0 (pin 2) with interrupt mode</p>
+
+<pre><code>CLI
+
+; Configure counter 2 in SW-ISR mode
+set counter 2 mode 1 parameter \
+  hw-mode:sw-isr \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:110 \
+  raw-reg:114 \
+  freq-reg:118 \
+  ctrl-reg:131 \
+  input-dis:20 \
+  direction:up \
+  scale:1.0
+
+; Map INT0 (pin 2) to discrete input 20 (REQUIRED!)
+gpio map 2 input 20
+
+; Enable auto-start
+set counter 2 start enable
+
+; Save
+save
+
+; View configuration
+show config
+; GPIO section: gpio 2 at input 20
+
+; View status
+show counters
+; pin column: 2
+</code></pre>
+
+<h3>Example 3: Software Polling Counter with Debounce</h3>
+
+<p><strong>Scenario:</strong> Count pulses on GPIO pin 22 with debounce filtering</p>
+
+<pre><code>CLI
+
+; Configure counter 3 in SOFTWARE mode
+set counter 3 mode 1 parameter \
+  hw-mode:sw \
+  count-on:rising \
+  start-value:0 \
+  res:32 \
+  prescaler:1 \
+  index-reg:120 \
+  raw-reg:124 \
+  freq-reg:128 \
+  ctrl-reg:132 \
+  input-dis:30 \
+  direction:up \
+  scale:1.0 \
+  debounce:on \
+  debounce-ms:50
+
+; Map GPIO pin 22 to discrete input 30
+gpio map 22 input 30
+
+; Enable auto-start
+set counter 3 start enable
+
+; Save
+save
+
+; View configuration
+show config
+; GPIO section: gpio 22 at input 30
+
+; View status
+show counters
+; pin column: 22 (user-selected GPIO)
+</code></pre>
+
+<h3>Example 4: Multi-Counter Setup (Mixed HW/SW/SW-ISR)</h3>
+
+<p><strong>Scenario:</strong> 4 counters with different modes and prescaler</p>
+
+<pre><code>CLI
+
+; Counter 1: Hardware (Timer5, pin 2) – High precision
+set counter 1 mode 1 parameter \
+  hw-mode:hw-t5 count-on:rising res:32 \
+  prescaler:1 index-reg:100 raw-reg:104 freq-reg:108 \
+  ctrl-reg:130 input-dis:125 direction:up scale:1.0
+
+; Counter 2: SW-ISR (INT0, pin 2)... WAIT! Pin conflict with counter 1!
+; Let's use different pins:
+
+; Counter 2: SW-ISR (INT1, pin 3)
+set counter 2 mode 1 parameter \
+  hw-mode:sw-isr count-on:rising res:32 \
+  prescaler:1 index-reg:110 raw-reg:114 freq-reg:118 \
+  ctrl-reg:131 input-dis:20 direction:up scale:1.0
+
+gpio map 3 input 20   ; Map INT1 (pin 3) to input 20
+
+; Counter 3: Software (GPIO 22) with prescaler
+set counter 3 mode 1 parameter \
+  hw-mode:sw count-on:rising res:32 \
+  prescaler:4 index-reg:120 raw-reg:124 freq-reg:128 \
+  ctrl-reg:132 input-dis:30 direction:up scale:2.5 \
+  debounce:on debounce-ms:50
+
+gpio map 22 input 30
+
+; Counter 4: Software (GPIO 23) with high prescaler
+set counter 4 mode 1 parameter \
+  hw-mode:sw count-on:rising res:32 \
+  prescaler:64 index-reg:130 raw-reg:134 freq-reg:138 \
+  ctrl-reg:133 input-dis:31 direction:up scale:0.1 \
+  debounce:on debounce-ms:30
+
+gpio map 23 input 31
+
+; Enable auto-start for all
+set counter 1 start enable
+set counter 2 start enable
+set counter 3 start enable
+set counter 4 start enable
+
+; Save
+save
+
+; View complete configuration
+show config
+show counters
+</code></pre>
+
+<hr>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+
+<h3>Issue: Counters not counting (HW mode)</h3>
+
+<p><strong>Symptom:</strong> Counter value stays 0, frequency shows 0 Hz</p>
+
+<p><strong>Solutions:</strong></p>
+
+<pre><code>; Check configuration
+show config
+
+; Check status
+show counters
+
+; Check if counter started
+read reg 130    ; ctrl-reg should show bit 1 set
+
+; Manually start if needed
+write reg 130 2 ; Set bit 1 (start)
+
+; Reset counter
+write reg 130 1 ; Set bit 0 (reset)
+
+; Monitor for changes
+show counters   ; Repeat every second
+</code></pre>
+
+<h3>Issue: SW-ISR Counter not Triggering</h3>
+
+<p><strong>Symptom:</strong> SW-ISR counter shows 0, ISR not triggered</p>
+
+<pre><code>; Verify GPIO mapping exists
+show gpio       ; Must show: gpio 2 at input 20
+
+; Verify counter configuration
+show config
+
+; Check if counter started
+read reg 131    ; ctrl-reg bit 1 should be set
+
+; Verify discrete input state
+show inputs     ; Check if input 20 state changes
+
+; Manually start counter
+write reg 131 2 ; Set bit 1 (start)
+
+; Monitor
+show counters
+</code></pre>
+
+<h3>Issue: Prescaler giving wrong values (v3.5.9 and earlier)</h3>
+
+<p><strong>Symptom:</strong> SW mode shows <code>value=1200, raw=1200</code> (both same)</p>
+
+<p><strong>Solution:</strong> Upgrade to v3.6.0+ which fixes unified prescaler</p>
+
+<pre><code>Expected behavior (v3.6.0+):
+  prescaler:64, 76800 edges input
+  value = 76800 (full precision)
+  raw = 1200 (76800 / 64)
+</code></pre>
+
+<hr>
+
+<h2 id="versions">Version History</h2>
+
+<h3>v3.6.1 (2025-11-14) – SW-ISR Mode Prescaler Fix</h3>
+
+<p><strong>CRITICAL FIX:</strong> SW-ISR mode prescaler konsistens (samme problem som SW mode)</p>
+
+<ul>
+  <li>Fjernet edgeCount prescaler check fra SW-ISR ISR handler</li>
+  <li>SW-ISR mode tæller nu ALLE edges (konsistent med HW og SW)</li>
+  <li>UNIFIED PRESCALER STRATEGI for ALLE counter modes</li>
+  <li>RAM: 83.5% (6841 bytes) | Flash: 27.2% (68994 bytes)</li>
+</ul>
+
+<h3>v3.6.0 (2025-11-14) – CRITICAL: SW Mode Prescaler Consistency Fix</h3>
+
+<p><span class="breaking-change">BREAKING CHANGE</span></p>
+
+<ul>
+  <li>Fjernet edgeCount prescaler check fra SW mode</li>
+  <li>SW mode tæller nu ALLE edges i counterValue</li>
+  <li>Raw register divideres med prescaler for BÅDE SW og HW mode</li>
+  <li>Unified strategi: Prescaler division kun ved output</li>
+  <li><strong>Impact:</strong> SW/SW-ISR counters will count differently</li>
+</ul>
+
+<h3>v3.4.7 (2025-11-14) – Software Prescaler Implementation (Breakthrough)</h3>
+
+<ul>
+  <li><strong>ROOT CAUSE IDENTIFIED:</strong> ATmega2560 Timer5 hardware limitation!</li>
+  <li>External clock mode (0x07): Tæller pulses på T5 pin, INGEN prescaler</li>
+  <li>Internal prescaler modes (0x02-0x05): Tæller 16MHz system clock, IGNORERER T5 pin!</li>
+  <li>Solution: Hardware bruges NU ALTID i external clock mode</li>
+  <li>Prescaler implementeret 100% i software</li>
+</ul>
+
+<h3>v3.3.0 (2025-11-11) – Hardware Counter Engine with HW/SW/SW-ISR Modes</h3>
+
+<ul>
+  <li>Hybrid HW/SW/SW-ISR Counter Engine (CounterEngine v6)</li>
+  <li>Hardware Mode: Direct timer input capture</li>
+  <li>Software-ISR Mode: Interrupt-driven edge detection</li>
+  <li>Software Mode: Polling-based GPIO edge detection</li>
+  <li>Automatic GPIO mapping (DYNAMIC) for HW counters</li>
+  <li>EEPROM schema v10 (added hwMode field)</li>
+</ul>
+
+<h3>v3.2.0 (2025-11-10) – Frequency Measurement</h3>
+
+<ul>
+  <li>Frequency Measurement: Automatic Hz measurement (0-20000 Hz)</li>
+  <li>Raw Register: Separate unscaled value register</li>
+  <li>Consistent Parameter Naming: index-reg, raw-reg, freq-reg</li>
+  <li>EEPROM schema v9</li>
+</ul>
+
+<hr>
+
+<h3>Support and Resources</h3>
+
+<div class="quickref">
+<b>Quick Links</b>
+<ul>
+  <li><strong>CLI Entry:</strong> Type <code>CLI</code> at serial monitor (115200 baud)</li>
+  <li><strong>Help System:</strong> Type <code>?</code> or <code>help</code> in CLI</li>
+  <li><strong>Configuration:</strong> <code>show config</code> displays complete system state</li>
+  <li><strong>Counter Status:</strong> <code>show counters</code> shows all counters with frequency</li>
+  <li><strong>Important:</strong> Always <code>save</code> before <code>reboot</code></li>
+</ul>
+</div>
+
+<hr>
+
+<p style="text-align:center; margin-top:2rem; color:#666; font-size:0.9rem;">
+  <strong>Modbus RTU Server v3.6.1</strong><br>
+  Arduino Mega 2560 – Unified Prescaler Architecture<br>
+  Build: 2025-11-14 | Status: Production Ready ✅
+</p>
+
+</body>
+</html>

@@ -12,7 +12,7 @@ void printStatistics() {
 
 void printStatus() {
   Serial.println("=== STATUS ===");
-  Serial.print("Ver: "); Serial.println(VERSION_STRING);
+  Serial.print("Ver: "); Serial.println(VERSION_STRING_NY);
   Serial.print("Build: "); Serial.println(VERSION_BUILD);
   Serial.print("State: "); Serial.println(serverRunning ? "RUNNING" : "STOPPED");
   Serial.print("Mode: "); Serial.println(monitorMode ? "MONITOR" : "SERVER");
@@ -27,7 +27,7 @@ void printStatus() {
 
 void printVersion() {
   Serial.println("=== VERSION ===");
-  Serial.println(VERSION_STRING);
+  Serial.println(VERSION_STRING_NY);
   Serial.println("Build: " VERSION_BUILD);
   Serial.println("===============");
 }

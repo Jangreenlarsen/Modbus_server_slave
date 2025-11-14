@@ -20,10 +20,6 @@ volatile uint32_t hwCounter4Extend = 0;
 volatile uint32_t hwCounter5Extend = 0;
 volatile uint16_t hwOverflowCount[4] = {0, 0, 0, 0};
 
-// Store prescaler mode for each counter (for frequency calculation)
-// Values: 1=external clock (no prescale), 3=/8, 4=/64, 5=/256, 6=/1024
-static uint8_t hwCounterPrescalerMode[4] = {1, 1, 1, 1};
-
 // ============================================================================
 // ISR - Timer1 Overflow (Counter 1, Pin D5/T1)
 // ============================================================================
@@ -72,24 +68,31 @@ bool hw_counter_init(uint8_t counter_id, uint8_t mode, uint32_t start_value) {
 
   uint8_t tccrb_clksel = 0;
 
-  // Map mode to TCCR5B clock select bits
-  // Mode values come from sanitizeHWPrescaler(): 1, 3, 4, 5, or 6
-  switch (mode) {
-    case 0: tccrb_clksel = 0x00; break;           // Stop timer
-    case 1: tccrb_clksel = 0x07; break;           // External clock, rising edge (T5 pin)
-    case 3: tccrb_clksel = 0x02; break;           // /8 prescale
-    case 4: tccrb_clksel = 0x03; break;           // /64 prescale
-    case 5: tccrb_clksel = 0x04; break;           // /256 prescale
-    case 6: tccrb_clksel = 0x05; break;           // /1024 prescale
-    default: tccrb_clksel = 0x07; break;          // Default to external clock
+  // CRITICAL: ATmega2560 Timer5 hardware limitation!
+  // External clock mode (0x07) counts pulses on T5 pin but CANNOT use prescaler.
+  // Internal prescaler modes (0x02-0x05) count system clock (16MHz / prescaler), NOT pulses!
+  //
+  // Solution: ALWAYS use external clock mode (0x07) for pulse counting.
+  // Prescaler is implemented in SOFTWARE by dividing counter value.
+  //
+  // See ATmega2560 datasheet Table 17-6 (TCCR5B Clock Select):
+  //   CS52:0 = 0b111 (0x07) = External clock on T5 pin, rising edge
+  //   CS52:0 = 0b010-0b101 = Internal clock (clkIO / prescaler) - IGNORES T5 pin!
+
+  if (mode == 0) {
+    tccrb_clksel = 0x00;  // Stop timer (no clock source)
+  } else {
+    tccrb_clksel = 0x07;  // ALWAYS use external clock for pulse counting
+                          // Prescaler is handled in software (see modbus_counters.cpp)
   }
 
   // Extract 16-bit TCNT and 16-bit extend parts from 32-bit start_value
   uint16_t tcnt_val = (uint16_t)(start_value & 0xFFFF);
   uint16_t extend_val = (uint16_t)(start_value >> 16);
 
-  // Store prescaler mode for frequency calculation (counter_id 4 = index 3)
-  hwCounterPrescalerMode[3] = mode;
+  // NOTE: Prescaler is now handled in software (see modbus_counters.cpp)
+  // Hardware always uses external clock mode (no prescaler)
+  // hwCounterPrescalerMode is no longer used
 
   // Only Timer5 case (counter_id=4) is implemented
   // Timer5 uses Pin 2 (PE4/T5) - verified working on Arduino Mega 2560
@@ -250,26 +253,10 @@ void hw_counter_update_frequency(uint16_t freq_reg, uint8_t counter_id) {
   // Update frequency every ~1 second (1000-2000 ms window for stability)
   if (timeDeltaMs >= 1000 && timeDeltaMs <= 2000) {
     // Calculate pulse delta from counter value
-    uint32_t counterDelta = currentCounterValue - lastCounterValue[idx];
-
-    // Get prescaler multiplier for this counter
-    // Mode 1 = external clock (no prescale, multiplier = 1)
-    // Mode 3 = /8 prescale (multiplier = 8)
-    // Mode 4 = /64 prescale (multiplier = 64)
-    // Mode 5 = /256 prescale (multiplier = 256)
-    // Mode 6 = /1024 prescale (multiplier = 1024)
-    uint16_t prescaleMultiplier = 1;
-    uint8_t mode = hwCounterPrescalerMode[idx];
-    switch (mode) {
-      case 3: prescaleMultiplier = 8; break;
-      case 4: prescaleMultiplier = 64; break;
-      case 5: prescaleMultiplier = 256; break;
-      case 6: prescaleMultiplier = 1024; break;
-      default: prescaleMultiplier = 1; break;  // Mode 1 or invalid = no prescale
-    }
-
-    // Calculate actual pulse count (counter delta × prescaler)
-    uint32_t pulseDelta = counterDelta * prescaleMultiplier;
+    // NOTE: Hardware now always counts ALL pulses (external clock mode).
+    // Prescaler is handled in software (see modbus_counters.cpp).
+    // So counterDelta represents actual pulse count.
+    uint32_t pulseDelta = currentCounterValue - lastCounterValue[idx];
 
     // Sanity check: if pulseDelta is unreasonably large, skip measurement
     // (e.g., pulseDelta > 100000 @ 1sec = >100kHz, max is 20kHz by design)

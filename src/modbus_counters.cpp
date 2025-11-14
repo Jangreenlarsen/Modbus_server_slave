@@ -928,11 +928,13 @@ void counters_print_status() {
     // Pin display: show actual GPIO pin
     if (c.hwMode != 0) {
       // HW mode: show GPIO pin based on timer
+      // NOTE (v3.6.1): Only Timer5 (hwMode=5) is implemented for HW counters
+      // Timer1, Timer3, Timer4 not routed to Arduino Mega headers
       uint8_t gpioPin = 0;
-      if (c.hwMode == 1) gpioPin = 5;
-      else if (c.hwMode == 3) gpioPin = 47;
-      else if (c.hwMode == 4) gpioPin = 6;
-      else if (c.hwMode == 5) gpioPin = 2;
+      if (c.hwMode == 1) gpioPin = 5;    // Timer1 (not routed)
+      else if (c.hwMode == 3) gpioPin = 9;    // Timer3 (not routed)
+      else if (c.hwMode == 4) gpioPin = 28;   // Timer4 (not routed)
+      else if (c.hwMode == 5) gpioPin = 47;   // Timer5 (Pin 47 / PL2 / T5) - CORRECT
       sprintf(buf, "%-5d| ", gpioPin);
     } else if (c.hwMode == 0 && c.interruptPin > 0) {
       // SW-ISR mode: show interrupt pin directly

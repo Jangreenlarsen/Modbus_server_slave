@@ -478,6 +478,16 @@ void counters_loop() {
     }
 
     // If not running -> track lastLevel, but don't count
+    // DEBUG: Log which inputIndex each counter is actually reading from
+    if (c.id == 4 && idx == 3) {
+      // Counter 4 debug
+      static uint16_t debugCounter4InputIndex = 0xFFFF;
+      if (debugCounter4InputIndex != c.inputIndex) {
+        debugCounter4InputIndex = c.inputIndex;
+        Serial.print(F("DEBUG: Counter 4 inputIndex = "));
+        Serial.println(c.inputIndex);
+      }
+    }
     bool lvl = di_read(c.inputIndex);
     if (!c.running) {
       c.lastLevel = lvl ? 1 : 0;
@@ -743,9 +753,11 @@ c.lastEdgeMs = 0;
       Serial.print(c.id);
       Serial.println(F(" HW mode not supported (only Timer5/pin47 available). Using SW mode instead."));
     } else {
-      // Only Timer5 (hwMode=5) is supported - Pin 2 (PE4/T5)
+      // Only Timer5 (hwMode=5) is supported - Pin 47 (PL2/T5)
+      // CRITICAL v3.6.2: Timer5 T5 external clock is Pin 47, NOT Pin 2!
+      // See: https://docs.arduino.cc/retired/hacking/hardware/PinMapping2560/
       uint8_t hw_id = 4;  // Timer5
-      uint8_t pin = 2;    // Pin 2 (PE4) - Timer5 external clock input (verified working)
+      uint8_t pin = 47;   // Pin 47 (PL2) - Timer5 T5 external clock input
 
       if (hw_id != 0) {
       // Check for GPIO conflicts and remove STATIC mappings
@@ -759,6 +771,13 @@ c.lastEdgeMs = 0;
       // HW counters read directly from hardware timer registers, not GPIO polling
       //
       // Clear ANY existing GPIO mapping for this pin to prevent GPIO polling interference
+      if (gpioToInput[pin] != -1) {
+        Serial.print(F("DEBUG v3.6.2: Removing GPIO mapping PIN "));
+        Serial.print(pin);
+        Serial.print(F(" from input "));
+        Serial.print(gpioToInput[pin]);
+        Serial.println(F(" (HW mode requires exclusive hardware access)"));
+      }
       gpioToInput[pin] = -1;  // DO NOT map HW timer pin to GPIO polling
 
       // Note: inputIndex is only used for display/logging, not for input reading

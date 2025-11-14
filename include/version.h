@@ -6,15 +6,17 @@
 //  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Global versions-info og ændringshistorik
 //  Ændringer:
-//    - v3.6.2: CRITICAL FIX: HW Counter GPIO polling interference
-//              - PROBLEM: GPIO polling (modbusLoop) read PIN 2 (Timer5's external clock)
-//              - Timer5 external clock input is PIN 2 (PE4), NOT PIN 47
-//              - GPIO mapping set gpioToInput[2] = inputIndex, causing polling to update discreteInputs
-//              - If Counter 4 (SW) accidentally read same inputIndex, both counted identically
-//              - LØSNING: HW mode counters must NOT be GPIO-mapped
-//              - Removed: gpioToInput[pin] = inputIndex for HW timer pins
-//              - Result: HW counters read only from timer hardware registers, immune to GPIO polling
-//              - BONUS: Fixed documentation (was saying Pin 47, Timer5 T5 is Pin 2)
+//    - v3.6.2: CRITICAL FIX: Timer5 PIN mapping and GPIO interference
+//              - ROOT CAUSE: Timer5 T5 external clock is PIN 47 (PL2), NOT PIN 2!
+//              - PROBLEM: Code incorrectly used PIN 2 for Timer5 external clock
+//              - Result: GPIO polling wrote PIN 47 to discreteInputs, HW counter missed pulses
+//              - When Counter 4 (SW) read from same discreteInputs index, both counted identically
+//              - LØSNING:
+//                • Fixed PIN: Timer5 T5 = PIN 47 (was PIN 2)
+//                • HW counters must NOT be GPIO-mapped (prevents polling interference)
+//                • Removed: gpioToInput[pin] = inputIndex for HW timer pins
+//              - Result: Timer5 hardware counts directly from PIN 47 pulses
+//              - Reference: https://docs.arduino.cc/retired/hacking/hardware/PinMapping2560/
 //    - v3.6.1: CRITICAL FIX: SW-ISR mode prescaler
 //    - v3.6.0: SW mode prescaler konsistens fix (edgeCount fjernet)
 //    - v3.5.0: Show counters display fix (læs fra registre)

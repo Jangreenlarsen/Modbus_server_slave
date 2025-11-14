@@ -161,10 +161,11 @@ pio device monitor -p COM3 -b 115200
      - Example: `set counter 1 mode 1 parameter hw-mode:sw-isr interrupt-pin:21 prescaler:64 index-reg:40 raw-reg:44`
 
   3. **HW (Timer5) Mode**: `set counter <id> mode 1 parameter hw-mode:hw-t5 prescaler:<P> ...`
-     - Uses Timer5 external clock on pin 2 (PE4/T5)
+     - Uses Timer5 external clock on pin 47 (PL2/T5)
      - Hardware counts all pulses (external clock mode only)
-     - Auto-maps GPIO pin 2 to discrete input
+     - Auto-maps GPIO pin 47 to discrete input
      - Max frequency ~20 kHz
+     - **See `docs/ATmega2560-timers-counters-configs.md` for full hardware limitations**
 
 **ScaleFloat:**
   - Applied to value register: `value = counterValue × scale`
@@ -204,10 +205,27 @@ pio device monitor -p COM3 -b 115200
 - Help text via `?` or `help` command
 - New commands should follow existing patterns (case-insensitive, space-delimited parameters)
 
+## ATmega2560 Hardware Reference
+
+**IMPORTANT: See `docs/ATmega2560-timers-counters-configs.md` for comprehensive documentation on:**
+- All available hardware timers (Timer0-Timer5) and external clock pins
+- Arduino Mega 2560 pin mapping (only T0 and T5 are accessible)
+- Timer5 hardware limitations and prescaler architecture
+- SW-ISR interrupt pin availability (INT0-INT5)
+- Practical considerations and conflicts
+- Future upgrade paths for multiple counters
+
+**Quick Facts:**
+- Timer5 external clock input: **Pin 47 (PL2/T5)** - RECOMMENDED for hw-mode:hw-t5
+- Timer0 external clock input: **Pin 38 (PD7/T0)** - AVOID (kernel dependencies)
+- SW-ISR interrupt pins: **Pins 2,3,18,19,20,21 (INT0-INT5)** - Pin 20 has PE6/T3 conflict
+- Max Timer5 frequency: ~20 kHz (clamped for stability)
+
 ## Important Files Reference
 
 | File | Purpose |
 |------|---------|
+| `docs/ATmega2560-timers-counters-configs.md` | **Comprehensive hardware timer/counter reference** |
 | `src/main.cpp` | Entry point, setup/loop, heartbeat |
 | `include/modbus_core.h` | Constants, function codes, buffer sizing, PersistConfig |
 | `include/modbus_globals.h` | Global data declarations (registers, coils, GPIO mappings) |
@@ -234,11 +252,17 @@ pio device monitor -p COM3 -b 115200
   - Still 1.3 KB free for runtime operations
 - **Flash**: 27.2% of 256 KB used (68994 bytes) - plenty of room for features
 - **EEPROM**: 4 KB - stores PersistConfig with CRC (schema v10)
-- **Timers**: 4 maximum (hardware constraint)
-- **Counters**: 4 maximum (hardware constraint)
-  - 3 operating modes per counter: SW, SW-ISR, HW
-- **Frequency measurement**: 0-20 kHz range (by design)
-- **Interrupt pins**: 6 available (INT0-INT5: pins 2,3,18,19,20,21)
+- **Timers**: 6 available on ATmega2560 chip (Timer0-Timer5)
+  - Timer0, Timer1, Timer2: Standard timers
+  - Timer3, Timer4, Timer5: Extended 16-bit timers (Arduino Mega only)
+  - **External clock input pins**: Only T0 (pin 38) and T5 (pin 47) practically accessible on Arduino Mega
+  - Timer5 recommended for hw-mode:hw-t5 (no kernel conflicts)
+- **Counters**: 4 maximum per system (hardware/design constraint)
+  - 3 operating modes per counter: SW (polling), SW-ISR (interrupt), HW (Timer5)
+  - Each mode can use different hardware: GPIO polling, INT0-INT5 interrupts, or Timer5 external clock
+- **Frequency measurement**: 0-20 kHz range (validated and clamped by design)
+- **Interrupt pins**: 6 available for SW-ISR mode (INT0-INT5: pins 2,3,18,19,20,21)
+  - ⚠️ Pin 20 (INT4/PE6): Potential conflict with Timer3 T3 pin (not used in current design)
 
 ## Backward Compatibility Notes
 

@@ -756,6 +756,14 @@ c.lastEdgeMs = 0;
       // Auto-map GPIO pin to discrete input for HW-mode counters
       // This enables GPIO-polling to read the physical pin and write to discrete input
       if (c.inputIndex < NUM_DISCRETE) {
+        // BUGFIX v3.6.2: Remove any conflicting GPIO mappings to the same inputIndex
+        // Prevents multiple PINs from mapping to the same discrete input
+        for (uint8_t p = 0; p < NUM_GPIO; p++) {
+          if (p != pin && gpioToInput[p] == (int16_t)c.inputIndex) {
+            gpioToInput[p] = -1;  // Remove conflicting mapping
+          }
+        }
+        // Now safely set this HW mode's pin mapping
         gpioToInput[pin] = (int16_t)c.inputIndex;
         pinMode(pin, INPUT);
       }
@@ -945,12 +953,12 @@ void counters_print_status() {
       sprintf(buf, "%-5d| ", c.interruptPin);
     } else if (c.hwMode != 0) {
       // HW mode without GPIO mapping: show hardcoded default for reference
-      // NOTE (v3.6.1): Only Timer5 (hwMode=5) is implemented for HW counters
+      // NOTE (v3.6.2 BUGFIX): Only Timer5 (hwMode=5) is implemented for HW counters
       uint8_t defaultPin = 0;
       if (c.hwMode == 1) defaultPin = 5;      // Timer1 default (not routed)
       else if (c.hwMode == 3) defaultPin = 9;    // Timer3 default (not routed)
       else if (c.hwMode == 4) defaultPin = 28;   // Timer4 default (not routed)
-      else if (c.hwMode == 5) defaultPin = 47;   // Timer5 default (Pin 47 / PL2 / T5)
+      else if (c.hwMode == 5) defaultPin = 2;   // Timer5 default (Pin 2 / PE4 / T5) - FIXED v3.6.2
       sprintf(buf, "%-5d| ", defaultPin);
     } else {
       // No pin mapping found

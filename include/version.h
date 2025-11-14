@@ -2,17 +2,18 @@
 // ============================================================================
 //  Filnavn : version.h
 //  Projekt  : Modbus RTU Server / CLI
-//  Version  : v3.6.1 (2025-11-14) - SW-ISR Mode Prescaler Fix
+//  Version  : v3.6.2 (2025-11-14) - GPIO Mapping Conflict Fix
 //  Forfatter: JanG at modbus_slave@laces.dk
 //  Formål   : Global versions-info og ændringshistorik
 //  Ændringer:
-//    - v3.6.1: CRITICAL FIX: SW-ISR mode prescaler (samme problem som SW mode)
-//              - PROBLEM: SW-ISR brugte også edgeCount prescaler check
-//              - Efter v3.6.0 fix gav dette DOBBELT prescaling i SW-ISR mode
-//              - ISR tæller hver X edge → counterValue prescaled
-//              - Output dividerer IGEN → raw alt for lille ❌
-//              - LØSNING: Fjernet edgeCount fra SW-ISR mode (linje 105-112)
-//              - NU: HW, SW, og SW-ISR mode ALLE konsistente ✅
+//    - v3.6.2: CRITICAL FIX: HW mode GPIO mapping conflicts
+//              - PROBLEM: Når HW counter konfigureres, kunne andre PINs blive mappet til samme inputIndex
+//              - Eksempel: PIN 2 (Timer5) til input 12, mens PIN 47 OGSÅ var mappet til 12
+//              - RESULTAT: Begge counters læste samme discrete input → tælte identiske værdier
+//              - LØSNING: Når HW mode sætter GPIO mapping, fjernes nu alle andre PINs
+//                        mappet til samme inputIndex først (konflikt-håndtering)
+//              - BONUS: Fixed display PIN for hwMode=5 (var 47, skal være 2 - PE4)
+//    - v3.6.1: CRITICAL FIX: SW-ISR mode prescaler
 //    - v3.6.0: SW mode prescaler konsistens fix (edgeCount fjernet)
 //    - v3.5.0: Show counters display fix (læs fra registre)
 //    - v3.4.7: HW mode external clock implementation
@@ -23,9 +24,9 @@
 
 #define VERSION_MAJOR    3
 #define VERSION_MINOR    6
-#define VERSION_PATCH    1
+#define VERSION_PATCH    2
 #ifndef VERSION_STRING_NY
-#define VERSION_STRING_NY  "v3.6.1"
+#define VERSION_STRING_NY  "v3.6.2"
 #endif
 #ifndef VERSION_BUILD
 #define VERSION_BUILD   "20251114"

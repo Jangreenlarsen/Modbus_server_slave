@@ -161,9 +161,9 @@ pio device monitor -p COM3 -b 115200
      - Example: `set counter 1 mode 1 parameter hw-mode:sw-isr interrupt-pin:21 prescaler:64 index-reg:40 raw-reg:44`
 
   3. **HW (Timer5) Mode**: `set counter <id> mode 1 parameter hw-mode:hw-t5 prescaler:<P> ...`
-     - Uses Timer5 external clock on pin 47 (PL2/T5)
+     - Uses Timer5 external clock on pin 2 (PE4/T5)
      - Hardware counts all pulses (external clock mode only)
-     - Auto-maps GPIO pin 47 to discrete input
+     - Auto-maps GPIO pin 2 to discrete input
      - Max frequency ~20 kHz
      - **See `docs/ATmega2560-timers-counters-configs.md` for full hardware limitations**
 
@@ -216,9 +216,9 @@ pio device monitor -p COM3 -b 115200
 - Future upgrade paths for multiple counters
 
 **Quick Facts:**
-- Timer5 external clock input: **Pin 47 (PL2/T5)** - RECOMMENDED for hw-mode:hw-t5
+- Timer5 external clock input: **Pin 2 (PE4/T5)** - RECOMMENDED for hw-mode:hw-t5
 - Timer0 external clock input: **Pin 38 (PD7/T0)** - AVOID (kernel dependencies)
-- SW-ISR interrupt pins: **Pins 2,3,18,19,20,21 (INT0-INT5)** - Pin 20 has PE6/T3 conflict
+- SW-ISR interrupt pins: **Pins 2,3,18,19,20,21 (INT0-INT5)** - Pin 2 har både T5 og INT2, Pin 20 har PE6/T3 konflikt
 - Max Timer5 frequency: ~20 kHz (clamped for stability)
 
 ## Important Files Reference
@@ -255,7 +255,7 @@ pio device monitor -p COM3 -b 115200
 - **Timers**: 6 available on ATmega2560 chip (Timer0-Timer5)
   - Timer0, Timer1, Timer2: Standard timers
   - Timer3, Timer4, Timer5: Extended 16-bit timers (Arduino Mega only)
-  - **External clock input pins**: Only T0 (pin 38) and T5 (pin 47) practically accessible on Arduino Mega
+  - **External clock input pins**: Only T0 (pin 38) and T5 (pin 2) practically accessible on Arduino Mega
   - Timer5 recommended for hw-mode:hw-t5 (no kernel conflicts)
 - **Counters**: 4 maximum per system (hardware/design constraint)
   - 3 operating modes per counter: SW (polling), SW-ISR (interrupt), HW (Timer5)

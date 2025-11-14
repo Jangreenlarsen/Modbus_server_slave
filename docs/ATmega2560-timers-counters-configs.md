@@ -52,7 +52,7 @@ Følgende timers understøtter eksterne clock inputs via dedikerede T-pins:
 | **Timer2** | (ingen) | - | - | ✗ Ikke understøttet |
 | **Timer3** | T3 | PE6 | Pin 9* | ⚠ Konflikt** |
 | **Timer4** | T4 | PH7 | Pin 28* | ⚠ Ikke standard routed |
-| **Timer5** | T5 | PL2 | Pin 47 | ✓ Tilgængelig |
+| **Timer5** | T5 | PE4 | Pin 2 | ✓ Tilgængelig |
 
 **Noter:**
 - *Pin 9 bruges som INT6 interrupt pin; kan være i konflikt med timer funktionalitet
@@ -67,7 +67,7 @@ Følgende timers understøtter eksterne clock inputs via dedikerede T-pins:
    - ⚠️ PROBLEM: Arduino kernel bruger Timer0 til `millis()`, `delay()`, etc.
    - ❌ ANBEFALING: Undgå i produktionssystemer
 
-2. **Timer5** (Pin 47 / T5 / PL2)
+2. **Timer5** (Pin 2 / T5 / PE4)
    - ✅ BEDSTE VALG: Fri, ingen kernel afhængigheder
    - ✅ ANBEFALING: Brug dette til hardware counters
 
@@ -94,22 +94,22 @@ Hvis du har brug for Timer1, Timer3 eller Timer4:
 ```
 Hardware Counter Configuration:
 ├─ Timer: Timer5 (16-bit)
-├─ External Clock Pin: T5 / PL2 / Arduino Pin 47
+├─ External Clock Pin: T5 / PE4 / Arduino Pin 2
 ├─ Max Frequency: ~20 kHz (ved 16MHz system clock)
 ├─ TCCR5B Register: 0x07 (External clock mode, rising edge)
 ├─ Counter Register: TCNT5 (16-bit value)
 └─ Usage: Hardware pulse/event counting in hw-mode:hw-t5
 ```
 
-### Pin 47 Hardwired Forbindelser
+### Pin 2 Hardwired Forbindelser
 
 ```
-Arduino Mega 2560 Pin 47
-├─ Microcontroller Pin: PL2
+Arduino Mega 2560 Pin 2
+├─ Microcontroller Pin: PE4
 ├─ Function 1: T5 (External clock input for Timer5) ← USED
-├─ Function 2: NONE (standard)
-├─ Available: JA, NO CONFLICTS
-└─ Discrete Input Mapping: Kan maps til discrete input via `gpio map 47 input <n>`
+├─ Function 2: INT2 (External interrupt)
+├─ Available: JA, NO CONFLICTS (INT2 kan bruges hvis nødvendigt)
+└─ Discrete Input Mapping: Kan maps til discrete input via `gpio map 2 input <n>`
 ```
 
 ---
@@ -154,7 +154,7 @@ Precision: Høj, ISR-baseret tælling
 #### Mode 3: HW (Hardware Timer5)
 ```
 Implementation: Timer5 external clock mode
-Hardware Pin: T5 / PL2 / Arduino Pin 47
+Hardware Pin: T5 / PE4 / Arduino Pin 2
 Clock Input: TCCR5B = 0x07 (external clock, rising edge)
 Counter Register: TCNT5 (16-bit, 0-65535)
 Max Frequency: ~20 kHz
@@ -360,7 +360,7 @@ Timer5 Maksimal Frequency:
 
 ✅ **Valgt løsning:** Timer5 for hardware counting
 ```
-├─ Pin: 47 (T5/PL2)
+├─ Pin: 2 (T5/PE4)
 ├─ Mode: External clock mode (TCCR5B=0x07)
 ├─ Prescaler: Software implementeret
 ├─ Maksimum frekvens: ~20 kHz

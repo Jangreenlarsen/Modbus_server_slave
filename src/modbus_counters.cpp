@@ -926,33 +926,35 @@ void counters_print_status() {
     sprintf(buf, "%-4s| ", hwStr);     Serial.print(buf);  // HW mode: SW|ISR|T1|T3|T4|T5
 
     // Pin display: show actual GPIO pin
-    if (c.hwMode != 0) {
-      // HW mode: show GPIO pin based on timer
-      // NOTE (v3.6.1): Only Timer5 (hwMode=5) is implemented for HW counters
-      // Timer1, Timer3, Timer4 not routed to Arduino Mega headers
-      uint8_t gpioPin = 0;
-      if (c.hwMode == 1) gpioPin = 5;    // Timer1 (not routed)
-      else if (c.hwMode == 3) gpioPin = 9;    // Timer3 (not routed)
-      else if (c.hwMode == 4) gpioPin = 28;   // Timer4 (not routed)
-      else if (c.hwMode == 5) gpioPin = 47;   // Timer5 (Pin 47 / PL2 / T5) - CORRECT
+    // IMPORTANT (v3.6.1): Respect GPIO mapping config for ALL counter modes
+    // First check if inputIndex is mapped to a GPIO pin
+    int16_t gpioPin = -1;
+    for (uint8_t pin = 0; pin < NUM_GPIO; pin++) {
+      if (gpioToInput[pin] == (int16_t)c.inputIndex) {
+        gpioPin = pin;
+        break;
+      }
+    }
+
+    // Display mapped pin if found, otherwise show default/nothing
+    if (gpioPin != -1) {
+      // GPIO mapping found - show actual mapped pin
       sprintf(buf, "%-5d| ", gpioPin);
     } else if (c.hwMode == 0 && c.interruptPin > 0) {
-      // SW-ISR mode: show interrupt pin directly
+      // SW-ISR mode: show interrupt pin directly (not GPIO mapped)
       sprintf(buf, "%-5d| ", c.interruptPin);
+    } else if (c.hwMode != 0) {
+      // HW mode without GPIO mapping: show hardcoded default for reference
+      // NOTE (v3.6.1): Only Timer5 (hwMode=5) is implemented for HW counters
+      uint8_t defaultPin = 0;
+      if (c.hwMode == 1) defaultPin = 5;      // Timer1 default (not routed)
+      else if (c.hwMode == 3) defaultPin = 9;    // Timer3 default (not routed)
+      else if (c.hwMode == 4) defaultPin = 28;   // Timer4 default (not routed)
+      else if (c.hwMode == 5) defaultPin = 47;   // Timer5 default (Pin 47 / PL2 / T5)
+      sprintf(buf, "%-5d| ", defaultPin);
     } else {
-      // SW polling mode: find GPIO pin mapped to this discrete input
-      int16_t gpioPin = -1;
-      for (uint8_t pin = 0; pin < NUM_GPIO; pin++) {
-        if (gpioToInput[pin] == (int16_t)c.inputIndex) {
-          gpioPin = pin;
-          break;
-        }
-      }
-      if (gpioPin != -1) {
-        sprintf(buf, "%-5d| ", gpioPin);
-      } else {
-        sprintf(buf, "%-5s| ", "-");  // No GPIO mapping
-      }
+      // No pin mapping found
+      sprintf(buf, "%-5s| ", "-");
     }
     Serial.print(buf);
     sprintf(buf, "%-7s| ", coStr);     Serial.print(buf);

@@ -534,9 +534,9 @@ static void print_gpio_config_block() {
     any = true;
     Serial.print(F("  gpio "));
     if (c.hwMode == 1) Serial.print(F("5"));
-    else if (c.hwMode == 3) Serial.print(F("47"));
-    else if (c.hwMode == 4) Serial.print(F("6"));
-    else if (c.hwMode == 5) Serial.print(F("2"));
+    else if (c.hwMode == 3) Serial.print(F("9"));
+    else if (c.hwMode == 4) Serial.print(F("28"));
+    else if (c.hwMode == 5) Serial.print(F("47"));  // v3.6.2 FIXED: Timer5 T5 is PIN 47, not PIN 2
 
     Serial.print(F(" DYNAMIC at input "));
     Serial.print(c.inputIndex);

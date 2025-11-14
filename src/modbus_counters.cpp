@@ -478,16 +478,6 @@ void counters_loop() {
     }
 
     // If not running -> track lastLevel, but don't count
-    // DEBUG: Log which inputIndex each counter is actually reading from
-    if (c.id == 4 && idx == 3) {
-      // Counter 4 debug
-      static uint16_t debugCounter4InputIndex = 0xFFFF;
-      if (debugCounter4InputIndex != c.inputIndex) {
-        debugCounter4InputIndex = c.inputIndex;
-        Serial.print(F("DEBUG: Counter 4 inputIndex = "));
-        Serial.println(c.inputIndex);
-      }
-    }
     bool lvl = di_read(c.inputIndex);
     if (!c.running) {
       c.lastLevel = lvl ? 1 : 0;
@@ -765,22 +755,12 @@ c.lastEdgeMs = 0;
         gpio_handle_dynamic_conflict(pin);
       }
 
-      // CRITICAL v3.6.2 BUGFIX: HW Counter must NOT be GPIO-mapped!
-      // Reason: Timer5 external clock uses PIN 2 (PE4) for pulse input
-      // GPIO polling reads PIN 2 every loop, causing hardware timer malfunction
-      // HW counters read directly from hardware timer registers, not GPIO polling
-      //
-      // Clear ANY existing GPIO mapping for this pin to prevent GPIO polling interference
-      if (gpioToInput[pin] != -1) {
-        Serial.print(F("DEBUG v3.6.2: Removing GPIO mapping PIN "));
-        Serial.print(pin);
-        Serial.print(F(" from input "));
-        Serial.print(gpioToInput[pin]);
-        Serial.println(F(" (HW mode requires exclusive hardware access)"));
-      }
-      gpioToInput[pin] = -1;  // DO NOT map HW timer pin to GPIO polling
-
-      // Note: inputIndex is only used for display/logging, not for input reading
+      // v3.6.2 BUGFIX: DO NOT GPIO-map HW timer PIN (PIN 47 for Timer5 T5)
+      // Reason: Timer5 HW counter reads pulses directly from hardware register
+      // GPIO polling must NOT read PIN 47 (would create duplicate/competing read)
+      // The DYNAMIC GPIO display in show config is informational only
+      // (managed by counters_print_status in cli_shell.cpp)
+      gpioToInput[pin] = -1;  // Ensure no GPIO polling interference
 
       // Initialize HW timer with prescaler mode and start value
       // Convert prescaler value (1,8,64,256,1024) to mode (1,3,4,5,6) for HW init

@@ -27,13 +27,13 @@ li{margin:0.3rem 0;}
 </head>
 <body>
 
-<h1>Modbus RTU Server v3.6.3 – Display Commands & Bugfixes Manual<span class="version-badge">v3.6.3</span></h1>
+<h1>Modbus RTU Server v3.6.5 – Complete System Reference Manual<span class="version-badge">v3.6.5</span></h1>
 
 <p><strong>Status:</strong> ✅ Production Ready</p>
 <p><strong>Build Date:</strong> 2025-11-15</p>
 <p><strong>Platform:</strong> Arduino Mega 2560 (ATmega2560 @ 16 MHz)</p>
-<p><strong>EEPROM Schema:</strong> v10 (HW/SW counter support)</p>
-<p><strong>Resource Usage:</strong> RAM: 83.0% (6798 / 8192 bytes) | Flash: 27.5% (69922 / 253952 bytes)</p>
+<p><strong>EEPROM Schema:</strong> v12 (GPIO persistence restored)</p>
+<p><strong>Resource Usage:</strong> RAM: 83.0% (6798 / 8192 bytes) | Flash: 27.7% (70226 / 253952 bytes)</p>
 
 <div class="critical">
 <b>🔴 BREAKING CHANGES in v3.6.0-v3.6.1</b><br>
@@ -73,6 +73,14 @@ Prescaler behavior changed fundamentally across ALL counter modes (HW, SW, SW-IS
   <li><strong>Timer Engine v2:</strong> 4 uafhængige programmérbare timere (4 modes)</li>
   <li><strong>Interactive CLI:</strong> Cisco-style shell over USB serial med komplet display commands</li>
   <li><strong>EEPROM Persistence:</strong> Konfiguration gemt i non-volatile memory (schema v10)</li>
+</ul>
+
+<h3>Nyheder i v3.6.5</h3>
+
+<ul>
+  <li><strong>🔴 CRITICAL BUGFIX: Slave ID & Baudrate Persistence</strong> – `set id` og `set baud` nu synker globalConfig, sikrer mod accidental revert</li>
+  <li><strong>📊 DOCUMENTATION: Counter Frequency Limitations</strong> – Nyt afsnit dokumenterer MAX frekvens per mode: HW ~20kHz, SW-ISR ~20kHz, SW ~500Hz</li>
+  <li><strong>✅ Cleaned Debug Output</strong> – Fjernet verbose debug messages fra boot sequence</li>
 </ul>
 
 <h3>Nyheder i v3.6.3</h3>
@@ -134,19 +142,18 @@ Prescaler behavior changed fundamentally across ALL counter modes (HW, SW, SW-IS
 <tr><td>18–19</td><td>Modbus RTU (Serial1)</td><td>RS-485 data</td><td>Reserved for Modbus</td></tr>
 <tr><td>8</td><td>RS-485 DIR Pin</td><td>Transceiver direction control</td><td>Do not use for GPIO</td></tr>
 <tr><td>13</td><td>LED Heartbeat</td><td>1 Hz toggle indicator</td><td>User LED output</td></tr>
-<tr><td><strong>5</strong></td><td><strong>Timer1 (HW Counter)</strong></td><td><strong>Hardware input (ICP1)</strong></td><td><strong>HW mode only</strong></td></tr>
-<tr><td><strong>47</strong></td><td><strong>Timer3 (HW Counter)</strong></td><td><strong>Hardware input (ICP3)</strong></td><td><strong>HW mode only</strong></td></tr>
-<tr><td><strong>6</strong></td><td><strong>Timer4 (HW Counter)</strong></td><td><strong>Hardware input (ICP4)</strong></td><td><strong>HW mode only</strong></td></tr>
-<tr><td><strong>2</strong></td><td><strong>Timer5 (HW Counter)</strong></td><td><strong>Hardware input (ICP5)</strong></td><td><strong>HW mode only (CRITICAL: NOT pin 46!)</strong></td></tr>
+<tr><td><strong>47</strong></td><td><strong>Timer5 (HW Counter) - ONLY IMPLEMENTED</strong></td><td><strong>Hardware input (T5, PL2)</strong></td><td><strong>HW mode only (v3.6.2+ corrected from pin 2)</strong></td></tr>
+<tr><td>5, 6, 47</td><td>Timer1/3/4 (NOT ROUTED)</td><td>Not available on Arduino headers</td><td>NOT IMPLEMENTED – only Timer5 supported</td></tr>
 <tr><td>2-4, 7, 9-12, 14-17, 20-45, 48-53</td><td>GPIO</td><td>Available for digital I/O</td><td>Use for SW counters, timers, mappings</td></tr>
 <tr><td><strong>2, 3, 18, 19, 20, 21</strong></td><td><strong>INT0-INT5 (Interrupts)</strong></td><td><strong>SW-ISR mode pins</strong></td><td><strong>External interrupts for ISR counters</strong></td></tr>
 </tbody>
 </table>
 
 <div class="critical">
-<b>🔴 CRITICAL: Timer5 Pin Mapping (v3.4.3 Fix)</b><br>
-Timer5 external clock uses <b>pin 2</b> (PE4), NOT pin 46!<br>
-This was discovered through hardware testing and verified working.
+<b>🔴 CRITICAL: Timer5 Pin Mapping (v3.6.2 Fix)</b><br>
+Timer5 external clock uses <b>PIN 47 (PL2)</b>, NOT pin 2!<br>
+Previous versions incorrectly documented as pin 2. Hardware testing (v3.6.2) verified correct pin is 47.<br>
+Using wrong pin prevented pulse detection.
 </div>
 
 <h3>RS-485 Wiring</h3>
@@ -336,18 +343,24 @@ External clock mode CANNOT use hardware prescaler!<br>
   <li>✅ <strong>Direkte Hardware Input</strong> – Bruger Arduino timer input capture pins (ICP1, ICP3, ICP4, ICP5)</li>
   <li>✅ <strong>Ingen Software Overhead</strong> – Hardware tæller edges uafhængigt</li>
   <li>✅ <strong>Præcis Frekvens Måling</strong> – Stabil frekvens måling selv under Modbus trafik</li>
-  <li>✅ <strong>Bedst for Høj-Frekvens</strong> – Ideal til 1-20 kHz signaler</li>
+  <li>✅ <strong>Bedst for Høj-Frekvens</strong> – Ideal til 1-20 kHz signaler (MAX: ~20 kHz)</li>
 </ul>
 
-<h4>Timer Selection</h4>
+<h4>Timer Implementation Status</h4>
+
+<div class="critical">
+<b>🔴 IMPORTANT: Only Timer5 Implemented (v3.6.1+)</b><br>
+ATmega2560 has 6 hardware timers (Timer0-5), but only Timer5 external clock input is routed to Arduino Mega headers.<br>
+Timer1, Timer3, Timer4 are not physically connected to GPIO pins on the Arduino platform.
+</div>
 
 <table>
-<thead><tr><th>Timer</th><th>GPIO Pin</th><th>Use Case</th><th>Interrupt</th></tr></thead>
+<thead><tr><th>Timer</th><th>GPIO Pin</th><th>Status</th><th>External Clock Mode</th></tr></thead>
 <tbody>
-<tr><td>T1</td><td>5</td><td>Frequency input</td><td>N/A</td></tr>
-<tr><td>T3</td><td>47</td><td>High-speed counting</td><td>N/A</td></tr>
-<tr><td>T4</td><td>6</td><td>Frequency measurement</td><td>N/A</td></tr>
-<tr><td>T5</td><td>2</td><td>General input capture</td><td>N/A</td></tr>
+<tr><td><strong>T5</strong></td><td><strong>47 (PL2)</strong></td><td><strong>✅ IMPLEMENTED</strong></td><td><strong>Supported – hw-mode:hw-t5</strong></td></tr>
+<tr><td>T1</td><td>5</td><td>❌ Not routed to headers</td><td>Not available</td></tr>
+<tr><td>T3</td><td>47</td><td>❌ Not routed to headers</td><td>Not available</td></tr>
+<tr><td>T4</td><td>6</td><td>❌ Not routed to headers</td><td>Not available</td></tr>
 </tbody>
 </table>
 
@@ -359,7 +372,7 @@ External clock mode CANNOT use hardware prescaler!<br>
   <li>✅ <strong>High-Frequency Capable:</strong> Interrupt-driven, better timing precision than polling</li>
   <li>✅ <strong>Flexibel GPIO:</strong> Brug INT0-INT5 pins (2, 3, 18, 19, 20, 21)</li>
   <li>✅ <strong>Deterministic Edge Detection:</strong> Hardware interrupt triggered</li>
-  <li>✅ <strong>Suitable for Medium Frequencies:</strong> 5-20 kHz possible</li>
+  <li>✅ <strong>Suitable for High Frequencies:</strong> MAX ~20 kHz (interrupt-driven, no polling overhead)</li>
 </ul>
 
 <h4>Begrænsninger</h4>
@@ -415,7 +428,7 @@ save
 
 <ul>
   <li>❌ <strong>Mindre Præcis:</strong> Software-baseret polling har jitter</li>
-  <li>❌ <strong>Lavere Max Frekvens:</strong> ~5 kHz maksimum (software-begrænset)</li>
+  <li>❌ <strong>Lavere Max Frekvens:</strong> ~500 Hz maksimum (polling-begrænset, loop timing overhead)</li>
   <li>❌ <strong>Kræver GPIO Mapping:</strong> Skal manuelt mappes via <code>gpio map</code></li>
 </ul>
 
@@ -439,6 +452,26 @@ save
   <li><strong>Stability:</strong> Immune to Modbus read traffic</li>
   <li><strong>Reset:</strong> Auto-resets on counter reset, overflow, or timeout</li>
 </ul>
+
+<h3>Frequency Limitations by Counter Mode</h3>
+
+<p>Hver counter mode har forskellige praktiske frekvens-grænser baseret på hardware og software overhead:</p>
+
+<table>
+<thead><tr><th>Counter Mode</th><th>Max Input Frequency</th><th>Root Cause</th><th>Use Case</th></tr></thead>
+<tbody>
+<tr><td><strong>HW (Timer5 only)</strong></td><td><strong>~20 kHz</strong></td><td>Hardware timer overflow rate, validation clamping</td><td>High-frequency industrial signals, encoder inputs</td></tr>
+<tr><td><strong>SW-ISR (INT0-INT5)</strong></td><td><strong>~20 kHz</strong></td><td>Interrupt processing + measurement window, no polling overhead</td><td>Medium-high frequency with flexible GPIO pins</td></tr>
+<tr><td><strong>SW (Polling)</strong></td><td><strong>~500 Hz</strong></td><td>Main loop timing overhead, modbusLoop() polling cycle</td><td>Low-frequency signals, debounce needed</td></tr>
+</tbody>
+</table>
+
+<div class="warning">
+<b>⚠️ Important: Frequency Measurement vs Input Frequency</b><br>
+The frequency limits above apply to the <b>measured frequency output</b> (freq-reg, 0-20000 Hz range).<br>
+<b>HW and SW-ISR modes</b> can technically count pulses faster than they can measure frequency accurately!<br>
+<b>SW (polling)</b> is software-limited to ~500 Hz for reliable edge detection due to main loop timing.
+</div>
 
 <h3>Control Register (ctrlReg)</h3>
 

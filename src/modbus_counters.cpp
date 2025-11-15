@@ -446,15 +446,34 @@ void counters_loop() {
             uint64_t deltaCount = 0;
             bool validDelta = true;
 
-            if (c.counterValue >= c.lastCountForFreq) {
-              deltaCount = c.counterValue - c.lastCountForFreq;
+            // Handle both UP and DOWN direction counting
+            if (c.direction == CNT_DIR_DOWN) {
+              // DOWN direction: count decreases (or wraps at underflow)
+              if (c.counterValue <= c.lastCountForFreq) {
+                // Normal down-counting: value decreased
+                deltaCount = c.lastCountForFreq - c.counterValue;
+              } else {
+                // Underflow wrap-around: value went from low to high (wrapped)
+                uint8_t bw = sanitizeBitWidth(c.bitWidth);
+                uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
+                deltaCount = c.lastCountForFreq + (maxVal - c.counterValue) + 1;
+                if (deltaCount > maxVal / 2) {
+                  validDelta = false;
+                }
+              }
             } else {
-              // Handle overflow wrap-around
-              uint8_t bw = sanitizeBitWidth(c.bitWidth);
-              uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
-              deltaCount = (maxVal - c.lastCountForFreq) + c.counterValue + 1;
-              if (deltaCount > maxVal / 2) {
-                validDelta = false;
+              // UP direction (default): count increases (or wraps at overflow)
+              if (c.counterValue >= c.lastCountForFreq) {
+                // Normal up-counting: value increased
+                deltaCount = c.counterValue - c.lastCountForFreq;
+              } else {
+                // Overflow wrap-around: value went from high to low (wrapped)
+                uint8_t bw = sanitizeBitWidth(c.bitWidth);
+                uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
+                deltaCount = (maxVal - c.lastCountForFreq) + c.counterValue + 1;
+                if (deltaCount > maxVal / 2) {
+                  validDelta = false;
+                }
               }
             }
 
@@ -594,18 +613,36 @@ void counters_loop() {
         uint64_t deltaCount = 0;
         bool validDelta = true;
 
-        if (c.counterValue >= c.lastCountForFreq) {
-          deltaCount = c.counterValue - c.lastCountForFreq;
+        // Handle both UP and DOWN direction counting
+        if (c.direction == CNT_DIR_DOWN) {
+          // DOWN direction: count decreases (or wraps at underflow)
+          if (c.counterValue <= c.lastCountForFreq) {
+            // Normal down-counting: value decreased
+            deltaCount = c.lastCountForFreq - c.counterValue;
+          } else {
+            // Underflow wrap-around: value went from low to high (wrapped)
+            uint8_t bw = sanitizeBitWidth(c.bitWidth);
+            uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
+            deltaCount = c.lastCountForFreq + (maxVal - c.counterValue) + 1;
+            // Sanity check: if deltaCount is unreasonably large, skip calculation
+            if (deltaCount > maxVal / 2) {
+              validDelta = false;
+            }
+          }
         } else {
-          // Handle overflow wrap-around
-          uint8_t bw = sanitizeBitWidth(c.bitWidth);
-          uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
-          deltaCount = (maxVal - c.lastCountForFreq) + c.counterValue + 1;
-
-          // Sanity check: if deltaCount is unreasonably large, skip calculation
-          // (probably counter reset or timing error)
-          if (deltaCount > maxVal / 2) {
-            validDelta = false;
+          // UP direction (default): count increases (or wraps at overflow)
+          if (c.counterValue >= c.lastCountForFreq) {
+            // Normal up-counting: value increased
+            deltaCount = c.counterValue - c.lastCountForFreq;
+          } else {
+            // Overflow wrap-around: value went from high to low (wrapped)
+            uint8_t bw = sanitizeBitWidth(c.bitWidth);
+            uint64_t maxVal = (bw == 64) ? 0xFFFFFFFFFFFFFFFFULL : ((1ULL << bw) - 1);
+            deltaCount = (maxVal - c.lastCountForFreq) + c.counterValue + 1;
+            // Sanity check: if deltaCount is unreasonably large, skip calculation
+            if (deltaCount > maxVal / 2) {
+              validDelta = false;
+            }
           }
         }
 

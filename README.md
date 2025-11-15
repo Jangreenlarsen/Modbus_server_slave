@@ -1,8 +1,8 @@
-# Modbus RTU Server v3.6.1
+# Modbus RTU Server v3.6.5
 
 🚀 **Production-Ready** Arduino Mega 2560 Modbus RTU Server med Unified Prescaler Architecture, 3 Counter Modes (HW/SW/SW-ISR), CLI, og Timer Engine.
 
-[![Version](https://img.shields.io/badge/version-3.6.1-blue.svg)](https://github.com/Jangreenlarsen/Modbus_server_slave/releases/tag/v3.6.1)
+[![Version](https://img.shields.io/badge/version-3.6.5-blue.svg)](https://github.com/Jangreenlarsen/Modbus_server_slave/releases/tag/v3.6.5)
 [![Platform](https://img.shields.io/badge/platform-Arduino%20Mega%202560-green.svg)](https://www.arduino.cc/en/Main/ArduinoBoardMega2560)
 [![Framework](https://img.shields.io/badge/framework-PlatformIO-orange.svg)](https://platformio.org/)
 
@@ -51,18 +51,20 @@
 - ✅ Global status/control registers
 - ✅ EEPROM persistence
 
-### CounterEngine v6 (with v3.6.1 Unified Prescaler)
+### CounterEngine v7 (with v3.6.5 Unified Prescaler)
 - ✅ 4 independent counters with **3 operating modes**
-- ✅ **HW Mode**: Direct hardware timer input (T1/T3/T4/T5 on pins 5/47/6/2)
-  - Highest precision, 0-20 kHz capable
-  - CRITICAL FIX (v3.4.3): Timer5 uses pin 2 (NOT pin 46!)
+- ✅ **HW Mode (Timer5 ONLY)**: Direct hardware timer input on PIN 47 (PL2)
+  - Highest precision, MAX ~20 kHz
+  - CRITICAL FIX (v3.6.2): Timer5 uses PIN 47 (NOT pin 2!)
+  - Only Timer5 routed to Arduino headers (Timer1/3/4 not available)
 - ✅ **SW-ISR Mode**: Interrupt-driven edge detection (INT0-INT5: pins 2,3,18,19,20,21)
   - Hardware interrupt triggered, deterministic
-  - High-frequency capable (5-20 kHz)
-  - NEW in v3.4.0, unified prescaler in v3.6.1
+  - MAX ~20 kHz capable
+  - NEW in v3.4.0, unified prescaler in v3.6.1, production ready
 - ✅ **SW Mode**: Software polling-based edge detection on GPIO pins
   - Flexible GPIO selection
   - Debounce filtering (1-255 ms)
+  - MAX ~500 Hz (polling-limited)
   - Suitable for low-frequency signals
 - ✅ **UNIFIED Prescaler Strategy (v3.6.0+)** - BREAKING CHANGE
   - ALL modes count EVERY edge (no edge skipping)
@@ -81,10 +83,10 @@
 - ✅ Control register (reset/start/stop/reset-on-read)
 - ✅ Overflow detection & auto-reset
 - ✅ Auto-start on boot (configurable)
-- ✅ EEPROM persistence (schema v10)
+- ✅ EEPROM persistence (schema v12)
 
 ### EEPROM Configuration
-- ✅ Persistent configuration (schema v10 - HW counter support)
+- ✅ Persistent configuration (schema v12 - GPIO persistence restored)
 - ✅ CRC checksum validation
 - ✅ Load/Save/Defaults commands
 - ✅ Modbus SAVE via FC06 (write reg 0 = 255)
@@ -101,9 +103,9 @@
 
 ### Board Configuration
 - **Platform**: Arduino Mega 2560 (ATmega2560 @ 16MHz)
-- **RAM**: 8 KB (83.5% used, 1.3 KB free) - increased due to v3.3.0 global config allocation
-- **Flash**: 256 KB (27.2% used) - plenty of headroom
-- **EEPROM**: 4 KB (schema v10)
+- **RAM**: 8 KB (83.0% used, 1.3 KB free) - increased due to v3.3.0 global config allocation
+- **Flash**: 256 KB (27.7% used) - plenty of headroom
+- **EEPROM**: 4 KB (schema v12)
 
 ### Pin Assignments
 | Pin | Function | Description |
@@ -112,7 +114,8 @@
 | 18-19 | Serial1 | Modbus RTU (configurable baud) |
 | 8 | RS-485 DIR | Direction control for RS-485 transceiver |
 | 13 | LED | Heartbeat indicator |
-| **5, 47, 6, 2** | **HW Timers** | **Timer1/3/4/5 external clock (HW counter mode)** |
+| **47 (PL2)** | **HW Timer5 - ONLY IMPLEMENTED** | **Timer5 external clock (HW counter mode) – v3.6.2 correct PIN** |
+| 5, 6, 47 | Timer1/3/4 pins (NOT ROUTED) | Not available on Arduino headers |
 | **2, 3, 18, 19, 20, 21** | **INT0-INT5** | **External interrupts (SW-ISR counter mode)** |
 | 2-53 | GPIO | Available for coils/inputs and SW counters |
 
@@ -173,9 +176,9 @@ Type `CLI` and press Enter to enter command mode.
 
 ### 4. Configure Counter - Three Operating Modes (v3.6.1)
 
-#### Hardware Mode (Highest Precision, 0-20 kHz)
+#### Hardware Mode (Highest Precision, MAX ~20 kHz)
 ```bash
-# Configure counter 1 in HARDWARE mode (Timer5 on pin 2)
+# Configure counter 1 in HARDWARE mode (Timer5 only on PIN 47)
 set counter 1 mode 1 parameter hw-mode:hw-t5 \
   count-on:rising start-value:0 res:32 prescaler:1 \
   index-reg:100 raw-reg:104 freq-reg:108 \
@@ -185,7 +188,7 @@ set counter 1 mode 1 parameter hw-mode:hw-t5 \
 set counter 1 start enable
 ```
 
-#### Software-ISR Mode (Interrupt-Driven, 5-20 kHz)
+#### Software-ISR Mode (Interrupt-Driven, MAX ~20 kHz)
 ```bash
 # Configure counter 2 in SW-ISR mode (INT0 on pin 2)
 set counter 2 mode 1 parameter hw-mode:sw-isr \
@@ -200,7 +203,7 @@ gpio map 2 input 20
 set counter 2 start enable
 ```
 
-#### Software Polling Mode (Flexible GPIO, Low-Frequency)
+#### Software Polling Mode (Flexible GPIO, MAX ~500 Hz)
 ```bash
 # Configure counter 3 in SOFTWARE mode (GPIO pin-based)
 set counter 3 mode 1 parameter hw-mode:sw \
@@ -222,12 +225,11 @@ save
 ```
 
 **Counter Mode Selection:**
-- `hw-mode:hw-t1` - Timer1 on pin 5 (highest precision)
-- `hw-mode:hw-t3` - Timer3 on pin 47
-- `hw-mode:hw-t4` - Timer4 on pin 6
-- `hw-mode:hw-t5` - Timer5 on pin 2 (CRITICAL FIX v3.4.3: NOT pin 46!)
-- `hw-mode:sw-isr` - Software-ISR on INT0-INT5 (pins 2,3,18,19,20,21)
-- `hw-mode:sw` - Software polling on any GPIO pin
+- `hw-mode:hw-t5` - Timer5 on PIN 47 (PL2) - ONLY HW MODE IMPLEMENTED (v3.6.1+)
+  - Timer1/3/4 NOT routed to Arduino headers (not available)
+  - CRITICAL FIX v3.6.2: PIN 47, NOT pin 2!
+- `hw-mode:sw-isr` - Software-ISR on INT0-INT5 (pins 2,3,18,19,20,21) – MAX ~20 kHz
+- `hw-mode:sw` - Software polling on any GPIO pin – MAX ~500 Hz
 
 **BREAKING CHANGE (v3.6.0+):**
 - ALL modes now count EVERY edge (no edge skipping)
@@ -503,10 +505,12 @@ set timer 4 mode 4 parameter \
 
 ## 📚 Dokumentation
 
-### Manualer (v3.6.1)
-- **[Modbus server V3.6.1 Manual - Unified Prescaler Architecture.html](Modbus%20server%20V3.6.1%20Manual%20-%20Unified%20Prescaler%20Architecture.html)** - ✨ **NEW** Complete HTML manual with all v3.6.1 features
+### Manualer (v3.6.5)
+- **[Modbus server V3.6.5 Manual - Complete System Reference.html](docs/Modbus%20server%20V3.6.3%20Manual%20-%20Display%20Commands%20&%20Bugfixes.html)** - ✨ **LATEST** Complete HTML manual with all v3.6.5 features
+  - v3.6.5: Slave ID persistence fix, Baudrate sync improvements
+  - Counter frequency limitations documented: HW/ISR ~20kHz, SW ~500Hz
   - Unified prescaler architecture (v3.6.0-v3.6.1)
-  - All 3 counter modes: HW, SW, SW-ISR (v3.3.0 foundation + v3.6.1 unification)
+  - All 3 counter modes: HW, SW, SW-ISR (v3.3.0 foundation + v3.6.5 complete)
   - ATmega2560 hardware limitation documentation (v3.4.7 discovery)
   - BREAKING CHANGES documentation
   - Interactive CLI command reference
@@ -532,15 +536,27 @@ set timer 4 mode 4 parameter \
 ## 📊 Version Info
 
 ```
-Version:        v3.6.1
-Build Date:     2025-11-14
-EEPROM Schema:  v10
+Version:        v3.6.5
+Build Date:     2025-11-15
+EEPROM Schema:  v12
 Platform:       Arduino Mega 2560 (ATmega2560 @ 16MHz)
 Framework:      Arduino + PlatformIO
-RAM Usage:      83.5% (6841 / 8192 bytes) - 1.3 KB free
-Flash Usage:    27.2% (68994 / 253952 bytes) - good headroom
-Status:         ✅ PRODUCTION READY (Unified Prescaler Architecture)
+RAM Usage:      83.0% (6798 / 8192 bytes) - 1.3 KB free
+Flash Usage:    27.7% (70226 / 253952 bytes) - good headroom
+Status:         ✅ PRODUCTION READY (Complete with Slave ID Persistence Fix)
 ```
+
+### v3.6.5 Highlights (2025-11-15) - Slave ID Persistence & Frequency Documentation
+- 🔴 **CRITICAL BUGFIX: Slave ID and Baudrate Persistence**
+  - `set id` and `set baud` commands now sync globalConfig immediately
+  - Prevents accidental revert if configApply() called later
+  - User must still run `save` to persist to EEPROM
+- 📊 **DOCUMENTATION: Counter Frequency Limitations**
+  - HW (Timer5 only): MAX ~20 kHz input frequency
+  - SW-ISR (INT0-INT5): MAX ~20 kHz input frequency
+  - SW (Polling): MAX ~500 Hz input frequency (main loop overhead)
+- ✅ **Cleaned Debug Output** – removed verbose boot messages
+- 📝 **Updated HTML Manual** – added frequency limitations table and Timer5 PIN documentation
 
 ### v3.6.1 Highlights (2025-11-14) - Unified Prescaler Architecture Complete
 - 🔴 **CRITICAL FIX: SW-ISR mode prescaler consistency**
@@ -584,11 +600,13 @@ Status:         ✅ PRODUCTION READY (Unified Prescaler Architecture)
 ### Version History (Selection)
 | Version | Date | Key Features |
 |---------|------|-------------|
+| **v3.6.5** | 2025-11-15 | 🔴 Slave ID/Baud persistence fix, Counter frequency limitations documented, clean debug output |
+| **v3.6.3** | 2025-11-15 | 🔴 reset-on-read HW fix, frequency DOWN direction fix, show config improvements |
 | **v3.6.1** | 2025-11-14 | 🔴 SW-ISR prescaler fix, unified architecture, SW-ISR production ready |
 | **v3.6.0** | 2025-11-14 | 🔴 CRITICAL: SW mode prescaler fix, unified strategy |
 | v3.5.0 | 2025-11-14 | Show counters display bug fix |
 | v3.4.7 | 2025-11-14 | 🔴 Software prescaler implementation, ATmega2560 limitation discovered |
-| v3.4.3 | 2025-11-13 | 🔴 Timer5 pin 2 fix (not pin 46) |
+| v3.4.3 | 2025-11-13 | 🔴 Timer5 pin correction (PIN 47, not pin 2) |
 | v3.4.0 | 2025-11-13 | SW-ISR interrupt mode production ready |
 | v3.3.0 | 2025-11-11 | Hardware counter mode, HW/SW dual modes, GPIO management |
 | v3.2.0 | 2025-11-10 | Frequency measurement, raw register, consistent naming |
@@ -608,7 +626,7 @@ Contributions are welcome! Please:
 ## 📞 Support
 
 - **GitHub Issues**: [Report bugs or request features](https://github.com/Jangreenlarsen/Modbus_server_slave/issues)
-- **Latest Release**: [v3.6.1](https://github.com/Jangreenlarsen/Modbus_server_slave/releases/tag/v3.6.1)
+- **Latest Release**: [v3.6.5](https://github.com/Jangreenlarsen/Modbus_server_slave/releases/tag/v3.6.5)
 - **Repository**: [Jangreenlarsen/Modbus_server_slave](https://github.com/Jangreenlarsen/Modbus_server_slave)
 
 ---
@@ -630,4 +648,4 @@ Built with:
 
 **Status: PRODUCTION READY** ✅
 
-*Last updated: 2025-11-14 | v3.6.1 - Unified Prescaler Architecture Complete*
+*Last updated: 2025-11-15 | v3.6.5 - Slave ID Persistence Fix & Frequency Documentation*

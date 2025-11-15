@@ -53,7 +53,11 @@ void setup() {
 
   initModbus();
 
+  Serial.print(F("% Before configApply: ID=")); Serial.println(currentSlaveID);
+
   configApply(globalConfig);
+
+  Serial.print(F("% After configApply: ID=")); Serial.println(currentSlaveID);
   Serial.println(F("% Modbus core initialized"));
   Serial.print(F("% ID: "));   Serial.print(currentSlaveID);
   Serial.print(F("  Baud: ")); Serial.println(currentBaudrate);

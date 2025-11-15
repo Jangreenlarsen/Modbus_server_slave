@@ -314,7 +314,9 @@ void processModbusFrame(uint8_t *frame, uint8_t len) {
   uint8_t rxSlave = frame[0];
   uint8_t fc      = frame[1];
   if (!listenToAll && rxSlave != currentSlaveID) {
-    Serial.println("IGNORED: Wrong slave ID"); wrongSlaveID++; return;
+    Serial.print("IGNORED: Wrong slave ID (device="); Serial.print(currentSlaveID);
+    Serial.print(", received="); Serial.print(rxSlave); Serial.println(")");
+    wrongSlaveID++; return;
   }
 
   validFrames++;

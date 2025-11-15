@@ -28,12 +28,12 @@
 
 #define VERSION_MAJOR    3
 #define VERSION_MINOR    6
-#define VERSION_PATCH    2
+#define VERSION_PATCH    3
 #ifndef VERSION_STRING_NY
-#define VERSION_STRING_NY  "v3.6.2"
+#define VERSION_STRING_NY  "v3.6.3"
 #endif
 #ifndef VERSION_BUILD
-#define VERSION_BUILD   "20251114"
+#define VERSION_BUILD   "20251115"
 #endif
 #ifndef CLI_VERSION
 #define CLI_VERSION     "v3.6.1"
@@ -42,6 +42,23 @@
 // ============================================================================
 //  CHANGELOG (uddrag)
 // ============================================================================
+//
+//  v3.6.3 (2025-11-15) - BUGFIXES: reset-on-read, frequency, show config
+//   • CRITICAL BUGFIX: Counter reset-on-read nu virker korrekt for HW Timer5 mode
+//       - Problem: reset-on-read satte c.counterValue, men hardware Timer5 blev overskrivet i counters_loop()
+//       - Løsning: hw_counter_reset_to_value() resetter hardware til startValue
+//       - Result: Modbus read #1 sender værdi, reset til startValue; read #2 sender startValue
+//   • CRITICAL BUGFIX: Frequency måling forkert for DOWN direction counters
+//       - Problem: Frequency kode antog altid UP-counting, DOWN counters gav forkert Hz
+//       - Løsning: Check c.direction før deltaCount beregning (UP vs DOWN)
+//       - Result: Counter 2 (ISR, down) nu ~1000 Hz i stedet for 3048
+//   • BUGFIX: show counters viste forkert PIN 2 for Timer5 (skulle være 47)
+//       - Problem: v3.6.2 opdaterede show config til PIN 47, men glemt show counters
+//       - Løsning: Opdater default PIN fra 2 til 47 for hwMode=5
+//   • IMPROVEMENT: show config viser nu ALLE counter DYNAMIC registre
+//       - Før: Kun index-reg vist (4 registre manglede)
+//       - Nu: Viser raw-reg, freq-reg, overload-reg, ctrl-reg + index-reg
+//       - Result: Komplet visning af counter register mapping
 //
 //  v3.6.1 (2025-11-14) - CRITICAL FIX: SW-ISR Mode Prescaler Consistency
 //   • BUGFIX: SW-ISR mode havde samme edgeCount prescaler problem som SW mode

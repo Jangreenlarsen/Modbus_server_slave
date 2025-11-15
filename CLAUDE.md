@@ -265,6 +265,123 @@ pio device monitor -p COM3 -b 115200
 | `src/status_info.cpp` | Status display helpers (`show config`, `show counters`, etc.) |
 | `include/version.h` | Version string, build date, complete changelog |
 
+## CLI Display Commands Reference
+
+### `show config` Command
+
+Displays complete system configuration including:
+
+**Format:**
+```
+regs
+  reg DYNAMIC <addr> value|raw|freq|overload|ctrl counter<id>
+  reg STATIC <addr> value <val>
+coils
+inputs
+  input DYNAMIC <idx> value counter<id>
+timers
+counters
+  counter <id> ENABLED/DISABLED edge=<type> prescaler=<val> res=<bits> ...
+```
+
+**DYNAMIC Registers Mapping:**
+- **value**: Scaled counter value (index-reg) - `counterValue × scale`
+- **raw**: Prescaled value (raw-reg) - `counterValue / prescaler`
+- **freq**: Measured frequency in Hz (freq-reg) - updated once per second
+- **overload**: Overflow flag (overload-reg) - 1=overflow, 0=normal
+- **ctrl**: Control register (ctrl-reg) - bitmask for RESET/START/STOP/Reset-On-Read
+
+**Counter Configuration Fields:**
+- `edge`: rising | falling | both
+- `prescaler`: 1, 4, 8, 16, 64, 256, 1024
+- `res`: 8, 16, 32, 64 (bit width)
+- `dir`: up | down (counting direction)
+- `scale`: float scale factor (1.000 = no scaling)
+- `input-dis`: discrete input index (for polling mode)
+- `index-reg`: value register address
+- `raw-reg`: prescaled value register address
+- `freq-reg`: frequency register address
+- `overload-reg`: overflow flag register address
+- `ctrl-reg`: control register address
+- `start`: startValue for reset-on-read
+- `debounce`: on | off + debounce-ms
+- `hw-mode`: sw | sw-isr | hw-t5
+- `interrupt-pin`: INT0-INT5 pin (for SW-ISR mode)
+
+**GPIO Mapping Display:**
+- **Static mappings**: User-configured GPIO bindings
+- **Dynamic mappings**: Auto-mapped by HW counters
+  - HW Timer5 (hwMode=5): Auto-maps PIN 47 (PL2/T5)
+  - SW-ISR mode: Auto-maps interrupt pin
+  - Each shown as `gpio <pin> DYNAMIC at input <idx> (counter<id> HW-T<n>)`
+
+---
+
+### `show counters` Command
+
+Real-time counter status display in table format:
+
+**Header Key:**
+```
+co = count-on (edge type)
+sv = startValue
+res = resolution (bit width)
+ps = prescaler
+ir = index-reg (value register address)
+rr = raw-reg (prescaled register address)
+fr = freq-reg (frequency register address)
+or = overload-reg (overflow flag register)
+cr = ctrl-reg (control register)
+dir = direction (up/down)
+sf = scaleFloat (scale factor)
+dis = input-dis (discrete input index)
+d = debounce (on/off)
+dt = debounce-ms (debounce time in ms)
+hw = hardware mode (SW|ISR|T1|T3|T4|T5)
+pin = GPIO pin (actual hardware pin)
+hz = measured frequency (Hz)
+value = scaled value
+raw = raw counter value (after prescaler division)
+```
+
+**Column Breakdown:**
+
+| Column | Description |
+|--------|-------------|
+| counter | Counter ID (1-4) |
+| mode | 0=disabled, 1=enabled |
+| hw | HW mode: SW (polling) \| ISR (interrupt) \| T5 (Timer5 hardware) |
+| pin | Actual GPIO pin number (from config or hardware default) |
+| co | Edge type: rising \| falling \| both |
+| sv | Start value (used by reset-on-read) |
+| res | Bit resolution: 8, 16, 32, 64 |
+| ps | Prescaler value: 1, 4, 8, 16, 64, 256, 1024 |
+| ir, rr, fr, or, cr | Register indices for each counter output |
+| dir | Count direction: up or down |
+| sf | Scale factor (1.000 = no scaling) |
+| d, dt | Debounce: on/off + time in ms |
+| hz | Measured frequency (0-20000 Hz, updated ~1sec) |
+| value | Scaled counter value = `counterValue × scale` |
+| raw | Prescaled value = `counterValue / prescaler` |
+
+**Important Notes:**
+- **value** contains the FULL precision counter with scale applied
+- **raw** contains prescaler-reduced value for register space savings
+- **hz** measures actual pulse frequency regardless of prescaler
+- For DOWN direction counters, frequency still shows positive Hz (absolute value)
+- Frequency updates approximately every second (1-2 sec timing window)
+
+**Example Row Interpretation:**
+```
+counter | mode| hw  | pin  | co     | sv       | res | ps   | ... | hz    | value     | raw
+ 3      | 1   | T5  | 47   | rising | 250000   | 32  | 1024 | ... | 1002  | 269958    | 263
+```
+- Counter 3 ENABLED, Timer5 hardware mode, PIN 47
+- Counting on RISING edges, starts at 250000, 32-bit
+- Prescaler 1024: raw = 269958 / 1024 = 263 ✓
+- Frequency measured at ~1002 Hz
+- value = counterValue × 1.0 = 269958
+
 ## Resource Constraints
 
 - **RAM**: 83.5% of 8 KB used (6841 bytes) - acceptable (v3.3.0 moved PersistConfig to global RAM)
@@ -278,8 +395,8 @@ pio device monitor -p COM3 -b 115200
   - Timer2 (8-bit): No external clock support
   - Timer3 (16-bit): Not routed to Arduino Mega headers
   - Timer4 (16-bit): Not routed to Arduino Mega headers
-  - Timer5 (16-bit): ONLY TIMER IMPLEMENTED for hw-mode:hw-t5 (pin 2, PE4, T5)
-  - **External clock input pins practically accessible**: ONLY T5 (pin 2) for HW counters (v3.6.1+)
+  - Timer5 (16-bit): ONLY TIMER IMPLEMENTED for hw-mode:hw-t5 (pin 47, PL2, T5)
+  - **External clock input pins practically accessible**: ONLY T5 (pin 47, PL2) for HW counters (v3.6.2+)
 - **Counters**: 4 maximum per system (hardware/design constraint)
   - 3 operating modes per counter: SW (polling), SW-ISR (interrupt), HW (Timer5 only)
   - Each mode uses different hardware: GPIO polling, INT1-INT5 interrupts, or Timer5 external clock

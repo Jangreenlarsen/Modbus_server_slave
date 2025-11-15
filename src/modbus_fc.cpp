@@ -68,12 +68,13 @@ static void fc_read_hregs(uint8_t rxSlave,uint8_t* f){
       c.overflowFlag = 0;
       if (c.overflowReg < NUM_REGS) holdingRegs[c.overflowReg] = 0;
 
-      // VIGTIGT: For HW mode, reset også selve hardware Timer5 registeret
+      // VIGTIGT: For HW mode, reset også selve hardware Timer5 registeret til startValue
       // Ellers bliver hardware counter værdi overført til c.counterValue igen i counters_loop()
       if (c.hwMode == 5) {
-        // Timer5 HW mode: reset hardware counter register
+        // Timer5 HW mode: reset hardware counter register til startValue
         uint8_t hw_id = 4;  // Timer5 only
-        hw_counter_reset(hw_id);
+        uint32_t hw_start_value = (uint32_t)(c.startValue & 0xFFFFFFFFUL);
+        hw_counter_reset_to_value(hw_id, hw_start_value);
         hw_counter_reset_frequency(hw_id);
       }
 

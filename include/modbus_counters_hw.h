@@ -47,6 +47,10 @@ uint32_t hw_counter_get_value(uint8_t counter_id);
 // Reset Timer5 counter to zero (resets both TCNT5 and extension)
 void hw_counter_reset(uint8_t counter_id);
 
+// Reset Timer5 counter to specific value (for reset-on-read with start value)
+// Sets TCNT5 to lower 16 bits of start_value and extension to upper 16 bits
+void hw_counter_reset_to_value(uint8_t counter_id, uint32_t start_value);
+
 // Stop/disable Timer5 (no clock source)
 void hw_counter_stop(uint8_t counter_id);
 

@@ -137,6 +137,24 @@ void hw_counter_reset(uint8_t counter_id) {
 }
 
 // ============================================================================
+// Reset Timer5 Counter to Specific Value (for reset-on-read)
+// ============================================================================
+void hw_counter_reset_to_value(uint8_t counter_id, uint32_t start_value) {
+  // Only Timer5 (counter_id=4) is supported
+  if (counter_id != 4) return;
+
+  // Parse 32-bit start_value into 16-bit parts
+  uint16_t tcnt_val = (uint16_t)(start_value & 0xFFFF);      // Lower 16 bits for TCNT5
+  uint16_t extend_val = (uint16_t)(start_value >> 16);       // Upper 16 bits for extension
+
+  cli();
+  TCNT5 = tcnt_val;
+  hwCounter5Extend = extend_val;
+  hwOverflowCount = 0;
+  sei();
+}
+
+// ============================================================================
 // Reset Frequency Measurement Tracking
 // ============================================================================
 // NOTE: This function accesses static variables from hw_counter_update_frequency

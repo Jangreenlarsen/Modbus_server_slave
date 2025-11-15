@@ -28,9 +28,9 @@
 
 #define VERSION_MAJOR    3
 #define VERSION_MINOR    6
-#define VERSION_PATCH    3
+#define VERSION_PATCH    4
 #ifndef VERSION_STRING_NY
-#define VERSION_STRING_NY  "v3.6.3"
+#define VERSION_STRING_NY  "v3.6.4"
 #endif
 #ifndef VERSION_BUILD
 #define VERSION_BUILD   "20251115"
@@ -42,6 +42,14 @@
 // ============================================================================
 //  CHANGELOG (uddrag)
 // ============================================================================
+//
+//  v3.6.4 (2025-11-15) - BUGFIX: CLI parser '=' support
+//   • BUGFIX: 'set id = 20' blev parserundt forkert, satte ID til 0
+//       - Problem: '=' token blev læst som værdi, strtol("=") = 0
+//       - Løsning: Skip '=' token og læs værdi fra næste position
+//       - Result: Begge syntakser virker: 'set id 20' og 'set id = 20'
+//   • BUGFIX: 'set baud = 9600' havde samme problem, nu fixed
+//   • CLIparser accepterer nu begge syntakser for set id og set baud
 //
 //  v3.6.3 (2025-11-15) - BUGFIXES: reset-on-read, frequency, show config
 //   • CRITICAL BUGFIX: Counter reset-on-read nu virker korrekt for HW Timer5 mode

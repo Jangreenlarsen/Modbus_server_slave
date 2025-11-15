@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Modbus RTU Server v3.6.1** is a production-ready embedded system for Arduino Mega 2560 that implements a complete Modbus RTU slave server with advanced features including TimerEngine, CounterEngine with unified prescaler strategy, frequency measurement, and an interactive CLI interface.
+**Modbus RTU Server v3.6.5** is a production-ready embedded system for Arduino Mega 2560 that implements a complete Modbus RTU slave server with advanced features including TimerEngine, CounterEngine with unified prescaler strategy, frequency measurement, and an interactive CLI interface.
 
 ### Key Architecture Components
 
@@ -37,7 +37,7 @@ The codebase is organized into three main execution subsystems:
    - **Three Operating Modes (v3.6.1 unified prescaler strategy)**:
      - **SW (Polling)**: `hw-mode:sw` - Software polling via discrete inputs
      - **SW-ISR (Interrupt)**: `hw-mode:sw-isr` - Hardware interrupt (INT0-INT5: pins 2,3,18,19,20,21) - alle tilgængelige
-     - **HW (Timer5 ONLY)**: `hw-mode:hw-t5` - Hardware Timer5 external clock (Pin 2/PE4/T5, max ~20 kHz, v3.6.1+ ENESTE timer)
+     - **HW (Timer5 ONLY)**: `hw-mode:hw-t5` - Hardware Timer5 external clock (Pin 47/PL2/T5, max ~20 kHz, v3.6.1+ ENESTE timer)
    - **CRITICAL Hardware Limitation (v3.4.7)**:
      - ATmega2560 Timer5 external clock mode CANNOT use hardware prescaler
      - Internal prescaler modes count system clock (16MHz), NOT external pulses
@@ -63,9 +63,10 @@ The codebase is organized into three main execution subsystems:
 
 - **Configuration Storage** (`include/modbus_core.h`, `src/config_store.cpp`):
   - `PersistConfig` struct holds all runtime config (timers, counters, GPIO, static regs)
-  - EEPROM schema versioning (current v10 with CRC checksum validation)
+  - EEPROM schema versioning (current v12 with CRC checksum validation)
   - Functions: `configLoad()`, `configSave()`, `configDefaults()`, `configApply()`
   - Note: v3.3.0 moved PersistConfig from stack to global RAM (~1KB) to prevent stack overflow
+  - v3.6.5 BUGFIX: `set id` and `set baud` now sync both RAM variables AND globalConfig simultaneously
 
 - **CLI State** (`src/cli_shell.cpp`):
   - Command parser with 256-char buffer
@@ -217,18 +218,18 @@ pio device monitor -p COM3 -b 115200
 - Practical considerations and conflicts
 - Future upgrade paths for multiple counters
 
-### ISR Status (v3.6.1)
+### ISR Status (v3.6.5)
 **KERNEL DEPENDENCIES (DO NOT MODIFY):**
 - Timer0 ISRs: millis(), delay(), Serial timing
 - USART0 ISRs: Serial USB communication
 - USART1 ISRs: Modbus RS-485 communication
 
 **USED BY PROJECT:**
-- Timer5 overflow ISR: HW counter via Pin 2
+- Timer5 overflow ISR: HW counter via Pin 47 (PL2/T5) [v3.6.2+ corrected from Pin 2]
 - INT1-INT5 ISRs: SW-ISR counter mode
 
 **RESERVED (AVOID):**
-- INT0 (Pin 2): Reserved for Timer5 T5 clock in HW mode
+- INT0 (Pin 2): Available but shared with Timer5 T5 input on some ATmega configurations (UNDGAA for SW-ISR)
 
 **AVAILABLE FOR FUTURE USE:**
 - Timer1, Timer3, Timer4 ISRs (timers not routed)
@@ -384,11 +385,11 @@ counter | mode| hw  | pin  | co     | sv       | res | ps   | ... | hz    | valu
 
 ## Resource Constraints
 
-- **RAM**: 83.5% of 8 KB used (6841 bytes) - acceptable (v3.3.0 moved PersistConfig to global RAM)
+- **RAM**: 83.0% of 8 KB used (6798 bytes) - acceptable (v3.3.0 moved PersistConfig to global RAM)
   - Note: RAM increased from 56.8% (v3.2.0) to 82.4% (v3.3.0) due to stack overflow fix
   - Still 1.3 KB free for runtime operations
-- **Flash**: 27.2% of 256 KB used (68994 bytes) - plenty of room for features
-- **EEPROM**: 4 KB - stores PersistConfig with CRC (schema v10)
+- **Flash**: 27.7% of 256 KB used (70226 bytes) - plenty of room for features (v3.6.5)
+- **EEPROM**: 4 KB - stores PersistConfig with CRC (schema v12)
 - **Timers**: 6 available on ATmega2560 chip (Timer0-Timer5), BUT ONLY Timer5 in HW mode
   - Timer0 (8-bit): Kernel dependencies (millis/delay/Serial)
   - Timer1 (16-bit): Not routed to Arduino Mega headers
@@ -405,6 +406,12 @@ counter | mode| hw  | pin  | co     | sv       | res | ps   | ... | hz    | valu
   - INT0 (pin 2): RESERVED for Timer5 T5 clock input in HW mode - UNDGAA for SW-ISR
 
 ## Backward Compatibility Notes
+
+- **v3.6.5 BUGFIX:** Slave ID and Baudrate persistence (non-breaking)
+  - `set id` and `set baud` commands now sync globalConfig immediately
+  - Prevents accidental revert if configApply() called later
+  - User must still run `save` to persist to EEPROM
+  - No impact on existing configurations
 
 - **v3.6.0-v3.6.1 BREAKING CHANGE:** Counter prescaler behavior changed fundamentally
   - **OLD (v3.5.9 and earlier):** SW/SW-ISR modes used edgeCount to skip edges (counterValue prescaled)

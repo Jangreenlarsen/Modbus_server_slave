@@ -263,15 +263,50 @@ static void print_static_config() {
   // --- REGS ---
   Serial.println(F("regs"));
 
-  // Dynamic regs fra CounterEngine (value-registre)
+  // Dynamic regs fra CounterEngine (alle 5 registre per counter)
   for (uint8_t i = 0; i < 4; ++i) {
     const CounterConfig& c = counters[i];
     if (!c.enabled) continue;                 // KUN hvis counter er enabled
-    if (c.regIndex >= NUM_REGS) continue;
-    Serial.print(F("  reg DYNAMIC "));
-    Serial.print(c.regIndex);
-    Serial.print(F(" value counter"));
-    Serial.println(c.id);
+
+    // Index-reg (scaled value)
+    if (c.regIndex < NUM_REGS) {
+      Serial.print(F("  reg DYNAMIC "));
+      Serial.print(c.regIndex);
+      Serial.print(F(" value counter"));
+      Serial.println(c.id);
+    }
+
+    // Raw-reg (prescaled value)
+    if (c.rawReg > 0 && c.rawReg < NUM_REGS) {
+      Serial.print(F("  reg DYNAMIC "));
+      Serial.print(c.rawReg);
+      Serial.print(F(" raw counter"));
+      Serial.println(c.id);
+    }
+
+    // Freq-reg (measured frequency Hz)
+    if (c.freqReg > 0 && c.freqReg < NUM_REGS) {
+      Serial.print(F("  reg DYNAMIC "));
+      Serial.print(c.freqReg);
+      Serial.print(F(" freq counter"));
+      Serial.println(c.id);
+    }
+
+    // Overload-reg (overflow flag)
+    if (c.overflowReg < NUM_REGS) {
+      Serial.print(F("  reg DYNAMIC "));
+      Serial.print(c.overflowReg);
+      Serial.print(F(" overload counter"));
+      Serial.println(c.id);
+    }
+
+    // Ctrl-reg (control register)
+    if (c.controlReg < NUM_REGS) {
+      Serial.print(F("  reg DYNAMIC "));
+      Serial.print(c.controlReg);
+      Serial.print(F(" ctrl counter"));
+      Serial.println(c.id);
+    }
   }
 
   // Static regs

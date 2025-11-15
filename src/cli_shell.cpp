@@ -1829,7 +1829,19 @@ if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "COIL") &
       Serial.println(F("Usage: set id <n> (0=ALL or 1..247)"));
       return;
     }
-    long idl = strtol(tok[2], nullptr, 10);
+
+    // Handle both "set id 20" and "set id = 20" syntax
+    uint8_t valueIdx = 2;
+    if (!strcmp(tok[2], "=")) {
+      // Skip the "=" token
+      if (ntok < 4) {
+        Serial.println(F("Usage: set id <n> (0=ALL or 1..247)"));
+        return;
+      }
+      valueIdx = 3;
+    }
+
+    long idl = strtol(tok[valueIdx], nullptr, 10);
     if (idl == 0) {
       listenToAll = true;
       Serial.println(F("OK: slave-id set to 0 (ALL) - respond-to-all DEBUG mode"));
@@ -1848,7 +1860,19 @@ if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "COIL") &
       Serial.println(F("Usage: set baud <n>"));
       return;
     }
-    unsigned long nb = strtoul(tok[2], nullptr, 10);
+
+    // Handle both "set baud 9600" and "set baud = 9600" syntax
+    uint8_t valueIdx = 2;
+    if (!strcmp(tok[2], "=")) {
+      // Skip the "=" token
+      if (ntok < 4) {
+        Serial.println(F("Usage: set baud <n>"));
+        return;
+      }
+      valueIdx = 3;
+    }
+
+    unsigned long nb = strtoul(tok[valueIdx], nullptr, 10);
     if (!isSupportedBaud(nb)) {
       Serial.println(F("% Unsupported baudrate"));
       return;

@@ -40,8 +40,14 @@ static void fc_read_hregs(uint8_t rxSlave,uint8_t* f){
   if(q<1||q>125){ sendException(rxSlave,FC_READ_HOLDING_REGS,EX_ILLEGAL_DATA_VALUE);return; }
   if((uint32_t)s+q>NUM_REGS){ sendException(rxSlave,FC_READ_HOLDING_REGS,EX_ILLEGAL_DATA_ADDRESS);return; }
   uint8_t resp[MAX_RESP]; resp[0]=rxSlave; resp[1]=FC_READ_HOLDING_REGS; resp[2]=q*2;
+  uint16_t idx=3;
+  for(uint16_t i=0;i<q;i++){
+    uint16_t v=holdingRegs[s+i];
+    resp[idx++]=v>>8;
+    resp[idx++]=v;
+  }
 
-  // --- Reset-on-Read håndtering for CounterEngine (FØR response konstrueres) ---
+  // --- Reset-on-Read håndtering for CounterEngine (EFTER response er konstrueret) ---
   for (uint8_t ci = 0; ci < 4; ++ci) {
     CounterConfig& c = counters[ci];
     if (!c.enabled) continue;
@@ -60,16 +66,9 @@ static void fc_read_hregs(uint8_t rxSlave,uint8_t* f){
       c.edgeCount = 0;
       c.overflowFlag = 0;
       if (c.overflowReg < NUM_REGS) holdingRegs[c.overflowReg] = 0;
-      // VIGTIGT: Skriv reset værdi til holdingRegs FØR response konstrueres
+      // Skriv reset værdi til holdingRegs EFTER response er sendt
       store_value_to_regs(ci);
     }
-  }
-
-  uint16_t idx=3;
-  for(uint16_t i=0;i<q;i++){
-    uint16_t v=holdingRegs[s+i];
-    resp[idx++]=v>>8;
-    resp[idx++]=v;
   }
 
   // --- TimerEngine: reset-on-read af statusreg ---

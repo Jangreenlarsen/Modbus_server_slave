@@ -967,7 +967,7 @@ void counters_print_status() {
       if (c.hwMode == 1) defaultPin = 5;      // Timer1 default (not routed)
       else if (c.hwMode == 3) defaultPin = 9;    // Timer3 default (not routed)
       else if (c.hwMode == 4) defaultPin = 28;   // Timer4 default (not routed)
-      else if (c.hwMode == 5) defaultPin = 2;   // Timer5 default (Pin 2 / PE4 / T5) - FIXED v3.6.2
+      else if (c.hwMode == 5) defaultPin = 47;   // Timer5 default (Pin 47 / PL2 / T5) - FIXED v3.6.2
       sprintf(buf, "%-5d| ", defaultPin);
     } else {
       // No pin mapping found

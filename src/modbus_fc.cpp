@@ -11,6 +11,7 @@
 #include "modbus_core.h"
 #include "modbus_timers.h"
 #include "modbus_counters.h"
+#include "modbus_counters_hw.h"
 
 // ---------------------------------------------------------------------------
 // READ HANDLERS
@@ -66,6 +67,16 @@ static void fc_read_hregs(uint8_t rxSlave,uint8_t* f){
       c.edgeCount = 0;
       c.overflowFlag = 0;
       if (c.overflowReg < NUM_REGS) holdingRegs[c.overflowReg] = 0;
+
+      // VIGTIGT: For HW mode, reset også selve hardware Timer5 registeret
+      // Ellers bliver hardware counter værdi overført til c.counterValue igen i counters_loop()
+      if (c.hwMode == 5) {
+        // Timer5 HW mode: reset hardware counter register
+        uint8_t hw_id = 4;  // Timer5 only
+        hw_counter_reset(hw_id);
+        hw_counter_reset_frequency(hw_id);
+      }
+
       // Skriv reset værdi til holdingRegs EFTER response er sendt
       store_value_to_regs(ci);
     }

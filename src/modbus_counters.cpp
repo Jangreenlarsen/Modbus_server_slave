@@ -119,7 +119,8 @@ static uint8_t hwPrescalerToMode(uint16_t prescaler) {
 }
 
 // Skaleret værdi -> holdingRegs[regIndex..] afhængig af bitWidth
-static void store_value_to_regs(uint8_t idx) {
+// Extern function brugt af reset-on-read i modbus_fc.cpp
+void store_value_to_regs(uint8_t idx) {
   if (idx >= 4) return;
   CounterConfig& c = counters[idx];
 

@@ -34,6 +34,7 @@ extern uint8_t counterAutoStartEnable[4];    // auto-start ved config load/reboo
 // Interne helpers brugt af CounterEngine og Modbus FC
 uint8_t sanitizeBitWidth(uint8_t bw);
 uint64_t maskToBitWidth(uint64_t v, uint8_t bw);
+void store_value_to_regs(uint8_t idx);  // Skriv counter værdi til holdingRegs (brugt af reset-on-read)
 
 // ============================================================================
 //  Konstanter / enums

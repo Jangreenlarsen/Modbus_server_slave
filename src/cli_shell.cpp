@@ -1844,11 +1844,17 @@ if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "COIL") &
     long idl = strtol(tok[valueIdx], nullptr, 10);
     if (idl == 0) {
       listenToAll = true;
+      // Update globalConfig to sync with RAM (prevent revert on configApply)
+      globalConfig.slaveId = 0;
       Serial.println(F("OK: slave-id set to 0 (ALL) - respond-to-all DEBUG mode"));
+      Serial.println(F("% Use 'save' to persist to EEPROM"));
     } else if (idl >= 1 && idl <= 247) {
       listenToAll = false;
       currentSlaveID = (uint8_t)idl;
+      // Update globalConfig to sync with RAM (prevent revert on configApply)
+      globalConfig.slaveId = (uint8_t)idl;
       Serial.print(F("OK: slave-id set to ")); Serial.println(currentSlaveID);
+      Serial.println(F("% Use 'save' to persist to EEPROM"));
     } else {
       Serial.println(F("% Invalid Slave ID (use 0 or 1..247)"));
     }
@@ -1878,11 +1884,14 @@ if (!strcmp(tok[0], "NO") && !strcmp(tok[1], "SET") && !strcmp(tok[2], "COIL") &
       return;
     }
     currentBaudrate = nb;
+    // Update globalConfig to sync with RAM (prevent revert on configApply)
+    globalConfig.baud = nb;
     MODBUS_SERIAL.end();
     delay(50);
     MODBUS_SERIAL.begin(nb);
     frameGapUs = rtuGapUs();
     Serial.print(F("OK: baudrate set to ")); Serial.println(nb);
+    Serial.println(F("% Use 'save' to persist to EEPROM"));
     return;
   }
 

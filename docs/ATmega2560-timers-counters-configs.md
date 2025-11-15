@@ -52,7 +52,7 @@ Følgende timers understøtter eksterne clock inputs via dedikerede T-pins:
 | **Timer2** | (ingen) | - | - | ✗ Ikke understøttet |
 | **Timer3** | T3 | PE6 | Pin 9* | ⚠ Konflikt** |
 | **Timer4** | T4 | PH7 | Pin 28* | ⚠ Ikke standard routed |
-| **Timer5** | T5 | PE4 | Pin 2 | ✓ Tilgængelig |
+| **Timer5** | T5 | PE4 | Pin 47 | ✓ Tilgængelig |
 
 **Noter:**
 - *Pin 9 bruges som INT6 interrupt pin; kan være i konflikt med timer funktionalitet
@@ -67,7 +67,7 @@ Følgende timers understøtter eksterne clock inputs via dedikerede T-pins:
    - ⚠️ PROBLEM: Arduino kernel bruger Timer0 til `millis()`, `delay()`, etc.
    - ❌ ANBEFALING: Undgå i produktionssystemer
 
-2. **Timer5** (Pin 2 / T5 / PE4)
+2. **Timer5** (Pin 47 / T5 / PE4)
    - ✅ BEDSTE VALG: Fri, ingen kernel afhængigheder
    - ✅ ANBEFALING: Brug dette til hardware counters
 

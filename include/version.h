@@ -28,9 +28,9 @@
 
 #define VERSION_MAJOR    3
 #define VERSION_MINOR    6
-#define VERSION_PATCH    4
+#define VERSION_PATCH    5
 #ifndef VERSION_STRING_NY
-#define VERSION_STRING_NY  "v3.6.4"
+#define VERSION_STRING_NY  "v3.6.5"
 #endif
 #ifndef VERSION_BUILD
 #define VERSION_BUILD   "20251115"
@@ -42,6 +42,16 @@
 // ============================================================================
 //  CHANGELOG (uddrag)
 // ============================================================================
+//
+//  v3.6.5 (2025-11-15) - CRITICAL BUGFIX: Slave ID persistence issue
+//   • CRITICAL BUGFIX: 'set id' og 'set baud' opdaterer ikke globalConfig
+//       - Problem: 'set id = 5' ændrede kun RAM variable currentSlaveID, ikke globalConfig.slaveId
+//       - Effect: Hvis configApply() blev kaldt senere, ID blev overwritten tilbage til gammel værdi
+//       - Result: Modbus frames modtages ikke på nyt ID, eller efter reboot/load/reboot
+//       - Løsning: 'set id' og 'set baud' opdaterer nu BÅDE RAM og globalConfig samtidigt
+//       - Effect: ID/baud er nu persistent i globalConfig, sikker mod configApply() overwrite
+//       - User must still run 'save' to persist to EEPROM, added reminders to both commands
+//   • Samme fix for 'set baud' command
 //
 //  v3.6.4 (2025-11-15) - BUGFIX: CLI parser '=' support
 //   • BUGFIX: 'set id = 20' blev parserundt forkert, satte ID til 0
